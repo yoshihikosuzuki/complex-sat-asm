@@ -18,13 +18,14 @@ Current implementation requires:
 
 ```bash
 $ git clone --recursive https://github.com/yoshihikosuzuki/complex-sat-asm
+$ cd complex-sat-asm
 ```
 
 2. Create a virtual environment with Python3.7:
 
 ```bash
-$ virtualenv -p python3.7 complex-sat-asm
-$ source complex-sat-asm/bin/activate
+$ python3.7 -m venv .venv
+$ source .venv/bin/activate
 ```
 
 3. Install codes with dependencies:
