@@ -1,3 +1,4 @@
+import numpy as np
 from BITS.seq.align import EdlibRunner
 from BITS.seq.util import revcomp_seq
 from .type import SelfAlignment, ReadInterval, TRUnit, TRRead
@@ -12,7 +13,7 @@ def revcomp_read(read: TRRead) -> TRRead:
                                       bb=read.length - aln.ae, be=read.length - aln.ab)
                         for aln in reversed(read.alignments)])
     trs = (None if read.trs is None
-           else [ReadInterval(start=tr.end, end=tr.start)
+           else [ReadInterval(start=read.length - tr.end, end=read.length - tr.start)
                  for tr in reversed(read.trs)])
 
     er = EdlibRunner("global", cyclic=True if not read.synchronized else False)
@@ -22,7 +23,7 @@ def revcomp_read(read: TRRead) -> TRRead:
         repr_aln = (None if unit.repr_aln is None
                     else er.align(seq[start:end], read.repr_units[unit.repr_id]))
         units.append(TRUnit(start=start, end=end,
-                            repr_id=unit.repd_id, repr_aln=repr_aln))
+                            repr_id=unit.repr_id, repr_aln=repr_aln))
 
     return TRRead(seq=seq,
                   id=read.id,

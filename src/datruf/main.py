@@ -82,7 +82,7 @@ class DatrufRunner:
                               f"{self.tmp_dir}/gather.sh",
                               job_name="datruf_gather",
                               log_fname=f"{self.tmp_dir}/log.gather",
-                              depend=jids,
+                              depend_job_ids=jids,
                               wait=True)
         script = f"find {self.tmp_dir} -name '{self.out_fname}.*' | sort"
         fnames = run_command(script).strip().split('\n')
