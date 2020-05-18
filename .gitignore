@@ -1,3 +1,7 @@
+# Added by user
+.vscode/
+work/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

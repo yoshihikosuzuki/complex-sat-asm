@@ -10,7 +10,7 @@ Current implementaion supports only:
 
 Current implementation requires:
 - Python3.7 (not 3.8)
-- Unpublished software named Consed (we offer alternative codes, though)
+- Unpublished software named Consed (we will offer alternative codes)
 
 ## How to install
 
@@ -32,6 +32,12 @@ $ source .venv/bin/activate
 
 ```bash
 $ python setup.py install
+```
+
+4. Add the virtual environment to Jupyter as a kernel
+
+```bash
+$ bash BITS/script/add_jupyter_kernel.sh .venv CSA
 ```
 
 ## How to use
