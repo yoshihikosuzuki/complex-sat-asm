@@ -203,7 +203,6 @@ class TRReadViewer:
             traces += [trace_unit, trace_info]
 
         # Show plot
-        logger.info(shapes)
         layout = make_layout(plot_size * 1.05, plot_size, title=f"Read {read.id} (strand={read.strand})",
                              x_range=[-read.length * 0.05, read.length + 100],
                              y_range=[0, read.length],

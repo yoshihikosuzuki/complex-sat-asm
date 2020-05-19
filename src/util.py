@@ -1,7 +1,8 @@
 import numpy as np
+from BITS.seq.io import SeqInterval
 from BITS.seq.align import EdlibRunner
 from BITS.seq.util import revcomp_seq
-from .type import SelfAlignment, ReadInterval, TRUnit, TRRead
+from .type import SelfAlignment, TRUnit, TRRead
 
 
 def revcomp_read(read: TRRead) -> TRRead:
@@ -13,7 +14,7 @@ def revcomp_read(read: TRRead) -> TRRead:
                                       bb=read.length - aln.ae, be=read.length - aln.ab)
                         for aln in reversed(read.alignments)])
     trs = (None if read.trs is None
-           else [ReadInterval(start=read.length - tr.end, end=read.length - tr.start)
+           else [SeqInterval(start=read.length - tr.end, end=read.length - tr.start)
                  for tr in reversed(read.trs)])
 
     er = EdlibRunner("global", cyclic=True if not read.synchronized else False)

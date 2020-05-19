@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional, List, Dict
 import numpy as np
-from BITS.seq.dazz import DazzRecord
+from BITS.seq.io import DazzRecord, SeqInterval
 from BITS.seq.align import Alignment
 
 
@@ -27,18 +27,7 @@ class SelfAlignment:
 
 
 @dataclass(eq=False)
-class ReadInterval:
-    """Represents an interval on a read, `read.seq[start:end]`."""
-    start: int
-    end: int
-
-    @property
-    def length(self) -> int:
-        return self.end - self.start
-
-
-@dataclass(eq=False)
-class TRUnit(ReadInterval):
+class TRUnit(SeqInterval):
     """Represents a tandem repeat unit on a read, `read.seq[start:end]`.
 
     positional variables:
@@ -73,7 +62,7 @@ class TRRead(DazzRecord):
     """
     strand: int = 0
     alignments: Optional[List[SelfAlignment]] = None
-    trs: Optional[List[ReadInterval]] = None
+    trs: Optional[List[SeqInterval]] = None
     units: Optional[List[TRUnit]] = None
     repr_units: Optional[Dict[int, str]] = None
     synchronized: bool = False

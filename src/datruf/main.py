@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Optional
 from multiprocessing import Pool
 import numpy as np
-from BITS.seq.dazz import db_to_n_reads
+from BITS.seq.io import db_to_n_reads
 from BITS.util.io import load_pickle, save_pickle
 from BITS.util.proc import run_command
 from BITS.util.scheduler import Scheduler

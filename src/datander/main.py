@@ -1,7 +1,7 @@
 from os.path import join
 from dataclasses import dataclass
 from typing import Optional
-from BITS.seq.dazz import db_to_n_blocks
+from BITS.seq.io import db_to_n_blocks
 from BITS.util.proc import run_command
 from BITS.util.scheduler import Scheduler
 

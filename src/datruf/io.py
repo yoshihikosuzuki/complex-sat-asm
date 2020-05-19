@@ -1,7 +1,24 @@
+from typing import Optional, Tuple, Dict
 from collections import defaultdict
-from BITS.seq.dazz import load_db
+from BITS.seq.io import load_db, load_db_track
 from BITS.util.proc import run_command
-from ..type import SelfAlignment, ReadInterval, TRRead
+from ..type import SelfAlignment, TRRead
+
+
+def load_self_alignments(db_fname: str, las_fname: str,
+                         dbid_range: Optional[Tuple[int, int]] = None) \
+        -> Dict[int, SelfAlignment]:
+    alns = defaultdict(list)
+    command = (f"LAdump -c {db_fname} {las_fname} "
+               f"{'' if dbid_range is None else '-'.join(map(str, dbid_range))}")
+    for line in run_command(command).strip().split('\n'):
+        line = line.strip()
+        if line.startswith('P'):
+            _, dazz_id, _, _, _ = line.split()
+        elif line.startswith('C'):
+            _, ab, ae, bb, be = line.split()
+            alns[int(dazz_id)].append(SelfAlignment(int(ab), int(ae), int(bb), int(be)))
+    return alns
 
 
 def load_tr_reads(start_dbid, end_dbid, db_fname, las_fname, return_all=False):
@@ -13,38 +30,23 @@ def load_tr_reads(start_dbid, end_dbid, db_fname, las_fname, return_all=False):
     all_reads_by_id = {read.id: read for read in all_reads}
 
     # Extract data from DBdump's output
-    dbdump_command = (f"DBdump -rh -mtan {db_fname} {start_dbid}-{end_dbid} | "
-                      f"awk '$1 == \"R\" {{dbid = $2}} "
-                      f"$1 == \"T0\" && $2 > 0 {{for (i = 1; i <= $2; i++) "
-                      f"printf(\"%s\\t%s\\t%s\\n\", dbid, $(2 * i + 1), $(2 * i + 2))}}'")
-
-    dbdumps = defaultdict(list)
-    for line in run_command(dbdump_command).strip().split('\n'):
-        if line == "":
-            continue
-        read_id, start, end = map(int, line.split('\t'))
-        dbdumps[read_id].append(ReadInterval(start, end))
+    tan_tracks = load_db_track(db_fname, track_name="tan",
+                               dbid_range=(start_dbid, end_dbid))
+    tan_intervals_by_id = {track.id: track.intervals for track in tan_tracks}
 
     # Extract data from LAdump's output
-    ladump_command = (f"LAdump -c {db_fname} {las_fname} {start_dbid}-{end_dbid} | "
-                      f"awk '$1 == \"P\" {{dbid = $2}} "
-                      f"$1 == \"C\" {{printf(\"%s\\t%s\\t%s\\t%s\\t%s\\n\", dbid, $2, $3, $4, $5)}}'")
-
-    ladumps = defaultdict(list)
-    for line in run_command(ladump_command).strip().split('\n'):
-        if line == "":
-            continue
-        read_id, ab, ae, bb, be = map(int, line.split('\t'))
-        ladumps[read_id].append(SelfAlignment(ab, ae, bb, be))
+    self_alns_by_id = load_self_alignments(db_fname, las_fname,
+                                           dbid_range=(start_dbid, end_dbid))
 
     # Merge the data into List[TRRead]
-    read_ids = (sorted(dbdumps.keys()) if not return_all
+    read_ids = ([track.id for track in tan_tracks
+                 if len(track.intervals) > 0] if not return_all
                 else list(range(start_dbid, end_dbid + 1)))
     reads = [TRRead(seq=all_reads_by_id[read_id].seq,
                     id=read_id,
                     name=all_reads_by_id[read_id].name,
-                    trs=dbdumps[read_id],
-                    alignments=sorted(sorted(ladumps[read_id],
+                    trs=tan_intervals_by_id[read_id],
+                    alignments=sorted(sorted(self_alns_by_id[read_id],
                                              key=lambda x: x.ab),
                                       key=lambda x: x.distance))
              for read_id in read_ids]
