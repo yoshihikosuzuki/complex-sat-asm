@@ -3,7 +3,6 @@ from typing import Union, Optional
 import numpy as np
 import matplotlib.cm as cm
 from matplotlib.colors import rgb2hex, XKCD_COLORS
-from logzero import logger
 from BITS.clustering.seq import ClusteringSeq
 from BITS.seq.align import EdlibRunner
 from BITS.seq.dotplot import DotPlot
