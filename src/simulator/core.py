@@ -1,10 +1,10 @@
-from typing import NamedTuple, Union, List
+from typing import NamedTuple, Union, List, Tuple
 import random
 from logzero import logger
 from BITS.seq.io import FastaRecord
 from BITS.seq.util import revcomp_seq
 
-BASES = ('a', 'c', 'g', 't')
+BASES = "acgt"
 
 
 def gen_random_seq(length: int) -> str:
@@ -54,17 +54,22 @@ class EditWeightsHomopolymer(NamedTuple):
 EditWeightsType = Union[EditWeights, EditWeightsHomopolymer]
 
 
+def edit_ops_for(edit_weights: EditWeightsType) -> Tuple[str]:
+    """Utility for choosing a proper set of edit operations."""
+    return (EDIT_OPS if isinstance(edit_weights, EditWeights)
+            else EDIT_OPS_HOMOPOLYMER)
+
+
 def gen_stochastic_edit_script(length: int,
                                edit_weights: EditWeightsType) -> str:
     """Generate a random edit script whose query length is `length`
     based on the weights of the edit operations `edit_weights`.
     """
+    edit_ops = edit_ops_for(edit_weights)
     s = ""
     query_len = 0   # length of the query string that `s` accepts
     while query_len < length:
-        c = random.choices(EDIT_OPS if isinstance(edit_weights, EditWeights)
-                           else EDIT_OPS_HOMOPOLYMER,
-                           weights=edit_weights)[0]
+        c = random.choices(edit_ops, weights=edit_weights)[0]
         s += c
         if c in ('=', 'X', 'D'):
             query_len += 1
@@ -76,28 +81,25 @@ def gen_deterministic_edit_script(length: int,
     """Generate an edit script in which the number of each edit operation is exactly
     the number expected from the weights `edit_weights`.
     """
+    edit_ops = edit_ops_for(edit_weights)
     # Calculate the expected number of each edit operation to insert
     edit_nums = [length * weight // sum(edit_weights)
                  for weight in edit_weights]
-    for i in range(1, len(edit_weights)):
-        if edit_weights[i] > 0 and edit_nums[i] == 0:
-            logger.warn(f"{i}-th edit op: given weight is >0 but not inserted "
-                        "because `length` is too short.")
+    # Adjust the number of matches
+    edit_nums[0] = length - edit_nums[-2] - edit_nums[-1]
+    for op, weight, n in zip(edit_ops, edit_weights, edit_nums):
+        if weight > 0 and n == 0:
+            logger.warn(f"Edit op {op}: weight {weight} is too small to insert the "
+                        "edit operation given the `length`")
     # Determine an edit script by shuffling the edit operations
-    edit_ops = (EDIT_OPS if isinstance(edit_weights, EditWeights)
-                else EDIT_OPS_HOMOPOLYMER)
-    s = (''.join([edit_ops[i] * edit_nums[i]
-                  for i in range(1, len(edit_ops))])
-         + edit_ops[0] * (length - edit_nums[-2] - edit_nums[-1]))
-    return ''.join(random.sample(s, len(s)))
+    edit_script = ''.join([op * n for op, n in zip(edit_ops, edit_nums)])
+    return ''.join(random.sample(edit_script, len(edit_script)))
 
 
-BASES_EXCEPT = {**{base: tuple(filter(lambda b: b != base, BASES))
-                   for base in BASES},
-                **{(base_x, base_y):
-                   tuple(filter(lambda b: b not in (base_x, base_y), BASES))
-                   for base_x in BASES
-                   for base_y in BASES}}
+BASES_EXCEPT = {**{base: BASES.replace(base, '')
+                   for base in BASES},   # single base
+                **{(base1, base2): BASES.replace(base1, '').replace(base2, '')
+                   for base1 in BASES for base2 in BASES}}   # two bases
 
 
 def apply_edit_script(seq: str,
