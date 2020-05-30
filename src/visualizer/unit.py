@@ -18,6 +18,7 @@ def scatter_ulen_comp(read: TRRead):
                           y_title="Total length of the units of the length [bp]"))
 
 
+# TODO: consider removing this
 def scatter_ulen_comps(reads: List[TRRead]):
     """Draw a unit length vs unit length * count plot for multiple reads."""
     comps = [sorted(read_to_ulen_comp(read)) for read in reads]
@@ -48,6 +49,7 @@ def reads_to_ulens_tot(reads: List[TRRead]) -> List[Tuple[int, int]]:
                    for ulen, count in reads_to_ulens_count(reads).items()])
 
 
+# TODO: merge two functions below
 def plot_ulens_count(reads: List[TRRead], min_ulen: int = 50):
     show_plot(make_hist(list(filter(lambda ulen: ulen >= min_ulen,
                                     [unit.length for read in reads for unit in read.units])),
