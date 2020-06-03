@@ -1,30 +1,16 @@
-from typing import Optional, Tuple, Dict
+from typing import Tuple, List, Dict, Set
 from collections import defaultdict
 from BITS.seq.io import load_db, load_db_track
 from BITS.util.proc import run_command
 from ..type import SelfAlignment, TRRead
 
 
-def load_self_alignments(db_fname: str, las_fname: str,
-                         dbid_range: Optional[Tuple[int, int]] = None) \
-        -> Dict[int, SelfAlignment]:
-    alns = defaultdict(list)
-    command = (f"LAdump -c {db_fname} {las_fname} "
-               f"{'' if dbid_range is None else '-'.join(map(str, dbid_range))}")
-    for line in run_command(command).strip().split('\n'):
-        line = line.strip()
-        if line.startswith('P'):
-            _, dazz_id, _, _, _ = line.split()
-        elif line.startswith('C'):
-            _, ab, ae, bb, be = line.split()
-            alns[int(dazz_id)].append(SelfAlignment(int(ab), int(ae), int(bb), int(be)))
-    return alns
-
-
-def load_tr_reads(start_dbid, end_dbid, db_fname, las_fname, return_all=False):
-    """By default only reads containing TR intervals are returned, but if <return_all> is True,
-    return all the reads from <start_dbid>-<end_dbid>. It is used for ReadViewer.
-    """
+def load_tr_reads(start_dbid: int,
+                  end_dbid: int,
+                  db_fname: str,
+                  las_fname: str,
+                  return_all: bool = False) -> List[TRRead]:
+    """NOTE: `return_all` is used by TRReadViewer."""
     # Load all reads within the ID range
     all_reads = load_db(db_fname, dbid_range=(start_dbid, end_dbid))
     all_reads_by_id = {read.id: read for read in all_reads}
@@ -50,14 +36,33 @@ def load_tr_reads(start_dbid, end_dbid, db_fname, las_fname, return_all=False):
                                              key=lambda x: x.ab),
                                       key=lambda x: x.distance))
              for read_id in read_ids]
-
     return reads
 
 
-def load_paths(read, inner_alignments, db_fname, las_fname):
-    # NOTE: Since alignment path information is very large, load for a single read on demand
+def load_self_alignments(db_fname: str,
+                         las_fname: str,
+                         dbid_range: Tuple[int, int]) -> Dict[int, SelfAlignment]:
+    alns = defaultdict(list)
+    command = (f"LAdump -c {db_fname} {las_fname} "
+               f"{'' if dbid_range is None else '-'.join(map(str, dbid_range))}")
+    for line in run_command(command).strip().split('\n'):
+        line = line.strip()
+        if line.startswith('P'):
+            _, dazz_id, _, _, _ = line.split()
+        elif line.startswith('C'):
+            _, ab, ae, bb, be = line.split()
+            ab, ae, bb, be = map(int, (ab, ae, bb, be))
+            alns[int(dazz_id)].append(SelfAlignment(ab, ae, bb, be))
+    return alns
 
-    def find_boundary(aseq, bseq):
+
+def load_paths(read: TRRead,
+               inner_alignments: Set,
+               db_fname: str,
+               las_fname: str) -> Dict[SelfAlignment, str]:
+    """Load self alignments for a single read (not multiple reads due to the size).
+    """
+    def find_boundary(aseq: str, bseq: str) -> Tuple[int, int]:
         # NOTE: "[" and "]" are alignment boundary, "..." is read boundary
         assert len(aseq) == len(bseq), "Different sequence lengths"
         assert aseq.count('[') <= 1, "Multiple ["
@@ -78,9 +83,10 @@ def load_paths(read, inner_alignments, db_fname, las_fname):
             end = len(aseq) + end + 1
         return start, end
 
-    def convert_symbol(aseq, bseq, symbol):
+    def convert_symbol(aseq: str, bseq: str, symbol: str) -> str:
         for x in (aseq, bseq, symbol):
-            assert ']' not in x and '[' not in x and '.' not in x, "Invalid character remains"
+            assert ']' not in x and '[' not in x and '.' not in x, \
+                "Invalid character remains"
         return ''.join(['=' if c == '|'
                         else 'I' if aseq[i] == '-'
                         else 'D' if bseq[i] == '-'
@@ -89,29 +95,28 @@ def load_paths(read, inner_alignments, db_fname, las_fname):
 
     if len(read.alignments) == 0:
         return {}
-
-    # Load pairwise alignment information
-    command = (f"LAshow4pathplot -a {db_fname} {las_fname} {read.id} | "
-               f"sed 's/,//g' | "
-               f"awk 'BEGIN {{first = 1}} "
-               f"NF == 7 {{if (first == 1) {{first = 0}} "
-               f"else {{printf(\"%s\\n%s\\n%s\\n%s\\n\", header, aseq, bseq, symbol)}}; "
-               f"header = $0; aseq = \"\"; bseq = \"\"; symbol = \"\"; count = 0;}} "
-               f"NF < 7 {{if (count == 0) {{aseq = aseq $0}} "
-               f"else if (count == 1) {{symbol = symbol $0}} "
-               f"else {{bseq = bseq $0}}; count++; count %= 3;}} "
-               f"END {{printf(\"%s\\n%s\\n%s\\n%s\\n\", header, aseq, bseq, symbol)}}'")
-    out = run_command(command).strip().split('\n')
-
     inner_paths = {}
-    # split every 4 lines (= single entry)
-    for header, aseq, bseq, symbol in zip(*([iter(out)] * 4)):
-        _, _, ab, ae, bb, be, _ = map(int, header.replace(' ', '').split('\t'))
+    # Load pairwise alignment information
+    command = f"LAshow4pathplot -a {db_fname} {las_fname} {read.id}"
+    lines = run_command(command).strip().split('\n')
+    end = len(lines)
+    for start in reversed(range(len(lines))):
+        if '\t' not in lines[start]:
+            continue
+        _, _, ab, ae, bb, be, _ = map(int, (lines[start]
+                                            .replace(',', '')
+                                            .replace(' ', '')
+                                            .split('\t')))
         alignment = SelfAlignment(ab, ae, bb, be)
-        if alignment in inner_alignments:
-            # Cut out the flanking regions in aseq, bseq, symbol outside the self alignment,
-            # and then convert |, * in symbol into CIGAR characters
-            fcigar = convert_symbol(*map(lambda x: x[slice(*find_boundary(aseq, bseq))],
-                                         [aseq, bseq, symbol]))
-            inner_paths[alignment] = fcigar
+        if alignment not in inner_alignments:
+            end = start
+            continue
+        aseq = ''.join(lines[start + 1:end:3])
+        bseq = ''.join(lines[start + 3:end:3])
+        symbol = ''.join(lines[start + 2:end:3])
+        # Remove flanking sequences and convert symbol to CIGARs
+        fcigar = convert_symbol(*map(lambda x: x[slice(*find_boundary(aseq, bseq))],
+                                     [aseq, bseq, symbol]))
+        inner_paths[alignment] = fcigar
+        end = start
     return inner_paths
