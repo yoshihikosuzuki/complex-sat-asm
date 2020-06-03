@@ -1,12 +1,12 @@
 from dataclasses import dataclass
-from typing import Optional
-from multiprocessing import Pool
-import numpy as np
+from typing import Optional, Tuple, List
+from multiprocessing.pool import Pool
+from logzero import logger
 from BITS.seq.io import db_to_n_reads
-from BITS.util.io import load_pickle, save_pickle
-from BITS.util.proc import run_command
-from BITS.util.scheduler import Scheduler
+from BITS.util.io import save_pickle
+from BITS.util.scheduler import Scheduler, run_distribute
 from .core import find_units
+from ..type import TRRead
 
 
 @dataclass(eq=False)
@@ -25,105 +25,71 @@ class DatrufRunner:
       @ max_cv       : Exclude a set of units cut from a tandem repeat if it has
                        a coefficient of variation greater than this value.
                        CV represents how a self alignment is wobbling.
+      @ scheduler    : `BITS.util.scheduler.Scheduler` object.
+      @ n_distribute : Number of jobs to be distributed.
       @ n_core       : Number of cores used in each job.
                        `n_distribute * n_core` cores are used in total.
-      @ n_distribute : Number of jobs to be distributed.
-      @ scheduler    : `BITS.util.scheduler.Scheduler` object.
       @ out_fname    : Output pickle file name.
-      @ tmp_dir      : Relative path to a directory for intermediate files.
+      @ tmp_dname    : Relative path to a directory for intermediate files.
     """
     db_fname: str
     las_fname: str
     max_cv: float = 0.1
-    n_core: int = 1
-    n_distribute: int = 1
     scheduler: Optional[Scheduler] = None
+    n_distribute: int = 1
+    n_core: int = 1
     out_fname: str = "tr_reads.pkl"
-    tmp_dir: str = "datruf"
+    tmp_dname: str = "datruf"
 
     def __post_init__(self):
         assert self.n_distribute == 1 or self.scheduler is not None, \
             "`scheduler` is required when `n_distribute` > 1"
-        if self.scheduler is not None:
-            run_command(f"mkdir -p {self.tmp_dir}; rm -f {self.tmp_dir}/*")
 
     def run(self):
         n_reads = db_to_n_reads(self.db_fname)
+        # Without job scheduler
         if self.scheduler is None:
-            self._run_without_scheduler(n_reads)
-        else:
-            self._run_with_scheduler(n_reads)
+            save_pickle(find_units_multi([(1, n_reads)],
+                                         self.db_fname,
+                                         self.las_fname,
+                                         self.max_cv,
+                                         self.n_core),
+                        self.out_fname)
 
-    def _run_without_scheduler(self, n_reads: int):
-        return find_units_multi(1, n_reads, self.max_cv, self.n_core,
-                                self.db_fname, self.las_fname, self.out_fname)
-
-    def _run_with_scheduler(self, n_reads: int):
-        unit_n = -(-n_reads // self.n_distribute)
-        jids = []
-        for i in range(self.n_distribute):
-            index = str(i + 1).zfill(int(np.log10(self.n_distribute) + 1))
-            start = 1 + i * unit_n
-            end = min([1 + (i + 1) * unit_n - 1, n_reads])
-            script = ' '.join(["python -m csa.datruf.main",
-                               self.db_fname,
-                               self.las_fname,
-                               f"{self.max_cv}",
-                               f"{self.tmp_dir}/{self.out_fname}.{index}",
-                               f"{start}",
-                               f"{end}",
-                               f"{self.n_core}"])
-            jids.append(self.scheduler.submit(script,
-                                              f"{self.tmp_dir}/scatter.sh.{index}",
-                                              job_name="datruf_scatter",
-                                              log_fname=f"{self.tmp_dir}/log.{index}",
-                                              n_core=self.n_core))
-        self.scheduler.submit("sleep 1s",
-                              f"{self.tmp_dir}/gather.sh",
-                              job_name="datruf_gather",
-                              log_fname=f"{self.tmp_dir}/log.gather",
-                              depend_job_ids=jids,
-                              wait=True)
-        script = f"find {self.tmp_dir} -name '{self.out_fname}.*' | sort"
-        fnames = run_command(script).strip().split('\n')
-        merged = []
-        for fname in fnames:
-            merged += load_pickle(fname)
-        save_pickle(merged, self.out_fname)
+        # With job scheduler
+        n_split = self.n_distribute * self.n_core
+        unit_n = -(-n_reads // n_split)
+        args = [(1 + i * unit_n,
+                 min([1 + (i + 1) * unit_n - 1, n_reads]))
+                for i in range(n_split)]
+        logger.info(f"args={args}")
+        save_pickle(run_distribute(func=find_units_multi,
+                                   args=args,
+                                   shared_args=dict(db_fname=self.db_fname,
+                                                    las_fname=self.las_fname,
+                                                    max_cv=self.max_cv),
+                                   scheduler=self.scheduler,
+                                   n_distribute=self.n_distribute,
+                                   n_core=self.n_core,
+                                   tmp_dname=self.tmp_dname,
+                                   job_name="datruf",
+                                   out_fname=self.out_fname),
+                    self.out_fname)
 
 
-def find_units_multi(start_dbid: int, end_dbid: int, max_cv: float, n_core: int,
-                     db_fname: str, las_fname: str, out_fname: str):
-    """Divide the whole task into `n_core` subtasks and run in parallel."""
-    if n_core == 1:
-        tr_reads = find_units(start_dbid, end_dbid, db_fname, las_fname)
-    else:
-        unit_n = -(-(end_dbid - start_dbid + 1) // n_core)
-        args = [(start_dbid + i * unit_n,
-                 min([start_dbid + (i + 1) * unit_n - 1, end_dbid]),
-                 db_fname,
-                 las_fname,
-                 max_cv)
-                for i in range(n_core)]
-        tr_reads = []
-        with Pool(n_core) as pool:
-            for tr_reads_unit in pool.starmap(find_units, args):
-                tr_reads += tr_reads_unit
-    save_pickle(tr_reads, out_fname)
-
-
-if __name__ == "__main__":
-    """For internal use only."""
-    import argparse
-    p = argparse.ArgumentParser()
-    p.add_argument("db_fname", type=str)
-    p.add_argument("las_fname", type=str)
-    p.add_argument("max_cv", type=float)
-    p.add_argument("out_fname", type=str)
-    p.add_argument("start_dbid", type=int)
-    p.add_argument("end_dbid", type=int)
-    p.add_argument("n_core", type=int)
-    args = p.parse_args()
-
-    find_units_multi(args.start_dbid, args.end_dbid, args.max_cv, args.n_core,
-                     args.db_fname, args.las_fname, args.out_fname)
+def find_units_multi(args: List[Tuple[int, int]],
+                     db_fname: str,
+                     las_fname: str,
+                     max_cv: float,
+                     n_core: int) -> List[TRRead]:
+    tr_reads = []
+    with Pool(n_core) as pool:
+        for ret in pool.starmap(find_units,
+                                [(start_dbid,
+                                  end_dbid,
+                                  db_fname,
+                                  las_fname,
+                                  max_cv)
+                                 for start_dbid, end_dbid in args]):
+            tr_reads += ret
+    return tr_reads

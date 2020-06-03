@@ -23,8 +23,8 @@ class DatanderRunner:
       @ tmp_dir   : Relative path to a directory for intermediate files.
     """
     db_prefix: str
-    n_core: int = 1
     scheduler: Optional[Scheduler] = None
+    n_core: int = 1
     tmp_dir: str = "datander"
 
     def __post_init__(self):
