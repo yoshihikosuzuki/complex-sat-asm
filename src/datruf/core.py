@@ -1,97 +1,111 @@
-from typing import List
+from typing import List, Set, Sequence
 import numpy as np
 from interval import interval
 from logzero import logger
 from BITS.util.interval import intvl_len, subtract_intvl
 from .io import load_tr_reads, load_paths
-from ..type import TRUnit, TRRead
+from ..type import SelfAlignment, TRUnit, TRRead
 
 
-def find_units(start_dbid: int, end_dbid: int,
-               db_fname: str, las_fname: str, max_cv: float) -> List[TRRead]:
+def find_units(start_dbid: int,
+               end_dbid: int,
+               db_fname: str,
+               las_fname: str,
+               max_cv: float,
+               max_slope_dev: float) -> List[TRRead]:
     """Determine unit sequences from self alignments reported by datander unless the
-    coefficient of variation among the unit lengths is larger than `max_cv`.
-    """
+    coefficient of variation among the unit lengths is larger than `max_cv`."""
     reads = load_tr_reads(start_dbid, end_dbid, db_fname, las_fname)
     for read in reads:
-        read.units = find_units_single(read, db_fname, las_fname, max_cv)
+        read.units = find_units_single(read, db_fname, las_fname,
+                                       max_cv, max_slope_dev)
     return reads
 
 
-def find_units_single(read: TRRead, db_fname: str, las_fname: str,
-                      max_cv: float) -> List[TRUnit]:
+def find_units_single(read: TRRead,
+                      db_fname: str,
+                      las_fname: str,
+                      max_cv: float,
+                      max_slope_dev: float) -> List[TRUnit]:
     """Determine a set of self alignments and cut out units from them."""
+    def coeff_var(x: Sequence) -> float:
+        return np.std(x, ddof=1) / np.mean(x)
+
+    inner_alns = find_inner_alns(read, max_slope_dev)
+    inner_paths = load_paths(read, inner_alns, db_fname, las_fname)
     all_units = []
-    # Determine a set of self alignments from which units are cut out
-    inner_alignments = find_inner_alignments(read)
-    # Load flattten CIGAR strings of the selected alignments
-    inner_paths = load_paths(read, inner_alignments, db_fname, las_fname)
-
-    for alignment, fcigar in inner_paths.items():
-        # Compute unit intervals based on the reflecting snake
-        # between the read and the self alignment
-        units = split_tr(alignment.ab, alignment.bb, fcigar)
-        if len(units) == 1:   # at least duplication is required
-            logger.debug(f"Skip read {read.id}: at least two units are required.")
+    for aln, fcigar in inner_paths.items():
+        units = split_tr(aln.ab, aln.bb, fcigar)
+        if len(units) < 2:   # at least duplication is required
+            logger.debug(f"Read {read.id}: TR with {len(units)} units "
+                         f"(ab={aln.ab}, be={aln.be})")
             continue
-
-        # Exclude TRs with abnormal CV (probably due to short unit length)
-        # and then add the units
-        ulens = [unit.length for unit in units]
-        cv_ulen = round(np.std(ulens, ddof=1) / np.mean(ulens), 3)
-        if cv_ulen >= max_cv:
-            logger.debug(f"Skip read {read.id}: unit lengths are too diverged.")
+        cv_ulen = round(coeff_var([unit.length for unit in units]), 3)
+        if cv_ulen >= max_cv:   # remove noisy self alignments
+            logger.debug(f"Read {read.id}: TR with CV = {cv_ulen}")
             continue
-
         all_units += units
     return remove_overlapping_units(all_units)
 
 
-def remove_overlapping_units(units: List[TRUnit]) -> List[TRUnit]:
-    """Resolve overlapping units by keeping longer units."""
-    units = sorted(units, key=lambda x: x.length, reverse=True)   # Sort by unit length
-    mapped_intvls = interval()
-    filtered_units = []
-    for unit in units:
-        unit_intvl = interval(*[(unit.start, unit.end - 1)])
-        if intvl_len(mapped_intvls & unit_intvl) == 0:   # greedily add units if not overlapped
-            filtered_units.append(unit)
-            mapped_intvls |= unit_intvl
-    return sorted(filtered_units, key=lambda x: x.start)
-
-
-def find_inner_alignments(read, min_len=1000):
-    """Extract a set of non-overlapping most inner self alignments.
-    <min_len> defines the required overlap length with yet uncovered TR region."""
+def find_inner_alns(read: TRRead,
+                    max_slope_dev: float,
+                    min_uncovered_len: int = 1000) -> Set[SelfAlignment]:
+    """Determine a set of self alignments from which tandem repeat units will
+    be extracted. How to choose such self alignments depends on the purpose.
+    Here we greedily pick up "innermost" self alignments iteratively until most
+    of the tandem repeat intervals are covered by them, along with some filters
+    for noisy inputs.
+    """
     uncovered = interval(*[(tr.start, tr.end) for tr in read.trs])
-    inner_alignments = set()
-    for alignment in read.alignments:   # in order of distance
-        if intvl_len(uncovered) < min_len:
+    inner_alns = set()
+    for aln in read.self_alns:   # in order of distance
+        if intvl_len(uncovered) < min_uncovered_len:   # TRs are mostly covered
             break
-        intersect = uncovered & interval[alignment.bb, alignment.ae]
-        uncovered = subtract_intvl(
-            uncovered, interval[alignment.bb, alignment.ae])
-        if (intvl_len(intersect) >= min_len
-            and 0.95 <= alignment.slope <= 1.05   # eliminate abnornal slope
-                and alignment.ab <= alignment.be):   # at least duplication
-            # TODO: add only intersection is better?
-            inner_alignments.add(alignment)
-    logger.debug(f"Read {read.id}: inners = {inner_alignments}")
-    return inner_alignments
+        intersect = uncovered & interval[aln.bb, aln.ae]
+
+        # TODO: this should be done only when the alignment is accepted?
+        uncovered = subtract_intvl(uncovered, interval[aln.bb, aln.ae])
+
+        if intvl_len(intersect) < min_uncovered_len:
+            continue
+        if not (1 - max_slope_dev <= aln.slope <= 1 + max_slope_dev):
+            logger.debug(f"Read {read.id}: abnormal slope = {aln.slope}")
+            continue
+        if aln.ab > aln.be:   # at least duplication is required
+            logger.debug(f"Read {read.id}: ab = {aln.ab} > be = {aln.be}")
+            continue
+        inner_alns.add(aln)
+    logger.debug(f"Read {read.id}: inners = {inner_alns}")
+    return inner_alns
 
 
-def split_tr(ab, bb, fcigar):
-    """Split TR interval into unit intervals given <fcigar> specifying self alignment
-    <ab> corresponds to the start position of the first unit
-    <bb> does the second"""
+def split_tr(ab: int,
+             bb: int,
+             fcigar: str) -> List[TRUnit]:
+    """Find intervals of TR units given a self alignment whose start position
+    is (`ab`, `bb`) and flatten CIGAR string is `fcigar`."""
     apos, bpos = ab, bb
     tr_units = [TRUnit(start=bpos, end=apos)]
-    # Iteratively find max{ax} such that bx == (last unit end)
+    # Iteratively find max(ax) such that bx == (last unit end)
     for i, c in enumerate(fcigar):
         if c != 'I':
             apos += 1
         if c != 'D':
             bpos += 1
-        if bpos == tr_units[-1].end and (i == len(fcigar) - 1 or fcigar[i + 1] != 'D'):
+        if (bpos == tr_units[-1].end
+                and (i == len(fcigar) - 1 or fcigar[i + 1] != 'D')):
             tr_units.append(TRUnit(start=tr_units[-1].end, end=apos))
     return tr_units
+
+
+def remove_overlapping_units(units: List[TRUnit]) -> List[TRUnit]:
+    """Resolve overlapping units by keeping longer units."""
+    filtered_units = []
+    mapped_intvls = interval()
+    for unit in sorted(units, key=lambda x: x.length, reverse=True):
+        unit_intvl = interval(*[(unit.start, unit.end - 1)])
+        if intvl_len(mapped_intvls & unit_intvl) == 0:
+            filtered_units.append(unit)
+            mapped_intvls |= unit_intvl
+    return sorted(filtered_units, key=lambda x: x.start)

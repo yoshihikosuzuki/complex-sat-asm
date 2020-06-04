@@ -8,40 +8,30 @@ from ..type import SelfAlignment, TRRead
 def load_tr_reads(start_dbid: int,
                   end_dbid: int,
                   db_fname: str,
-                  las_fname: str,
-                  return_all: bool = False) -> List[TRRead]:
-    """NOTE: `return_all` is used by TRReadViewer."""
-    # Load all reads within the ID range
+                  las_fname: str) -> List[TRRead]:
+    """Load reads whose IDs are within a range (start_dbid, end_dbid), along
+    with tandem repeat intervals and self alignments."""
     all_reads = load_db(db_fname, dbid_range=(start_dbid, end_dbid))
     all_reads_by_id = {read.id: read for read in all_reads}
-
-    # Extract data from DBdump's output
-    tan_tracks = load_db_track(db_fname, track_name="tan",
-                               dbid_range=(start_dbid, end_dbid))
-    tan_intervals_by_id = {track.id: track.intervals for track in tan_tracks}
-
-    # Extract data from LAdump's output
-    self_alns_by_id = load_self_alignments(db_fname, las_fname,
-                                           dbid_range=(start_dbid, end_dbid))
-
-    # Merge the data into List[TRRead]
-    read_ids = ([track.id for track in tan_tracks
-                 if len(track.intervals) > 0] if not return_all
-                else list(range(start_dbid, end_dbid + 1)))
-    reads = [TRRead(seq=all_reads_by_id[read_id].seq,
-                    id=read_id,
-                    name=all_reads_by_id[read_id].name,
-                    trs=tan_intervals_by_id[read_id],
-                    alignments=sorted(sorted(self_alns_by_id[read_id],
-                                             key=lambda x: x.ab),
-                                      key=lambda x: x.distance))
-             for read_id in read_ids]
-    return reads
+    tan_tracks_by_id = load_db_track(db_fname, track_name="tan",
+                                     dbid_range=(start_dbid, end_dbid))
+    self_alns_by_id = load_self_alns(db_fname, las_fname,
+                                     dbid_range=(start_dbid, end_dbid))
+    tr_read_ids = sorted({read_id for read_id, tracks in tan_tracks_by_id.items()
+                          if len(tracks) > 0})   # IDs of reads with TRs
+    return [TRRead(id=read_id,
+                   name=all_reads_by_id[read_id].name,
+                   seq=all_reads_by_id[read_id].seq,
+                   trs=tan_tracks_by_id[read_id],
+                   self_alns=sorted(sorted(self_alns_by_id[read_id],
+                                           key=lambda x: x.ab),
+                                    key=lambda x: x.distance))
+            for read_id in tr_read_ids]
 
 
-def load_self_alignments(db_fname: str,
-                         las_fname: str,
-                         dbid_range: Tuple[int, int]) -> Dict[int, SelfAlignment]:
+def load_self_alns(db_fname: str,
+                   las_fname: str,
+                   dbid_range: Tuple[int, int]) -> Dict[int, SelfAlignment]:
     alns = defaultdict(list)
     command = (f"LAdump -c {db_fname} {las_fname} "
                f"{'' if dbid_range is None else '-'.join(map(str, dbid_range))}")
@@ -57,11 +47,11 @@ def load_self_alignments(db_fname: str,
 
 
 def load_paths(read: TRRead,
-               inner_alignments: Set,
+               inner_alns: Set[SelfAlignment],
                db_fname: str,
                las_fname: str) -> Dict[SelfAlignment, str]:
-    """Load self alignments for a single read (not multiple reads due to the size).
-    """
+    """Load a flatten CIGAR string for each self alignment in `inner_alns`."""
+
     def find_boundary(aseq: str, bseq: str) -> Tuple[int, int]:
         # NOTE: "[" and "]" are alignment boundary, "..." is read boundary
         assert len(aseq) == len(bseq), "Different sequence lengths"
@@ -93,8 +83,6 @@ def load_paths(read: TRRead,
                         else 'X'
                         for i, c in enumerate(symbol)])
 
-    if len(read.alignments) == 0:
-        return {}
     inner_paths = {}
     # Load pairwise alignment information
     command = f"LAshow4pathplot -a {db_fname} {las_fname} {read.id}"
@@ -107,8 +95,8 @@ def load_paths(read: TRRead,
                                             .replace(',', '')
                                             .replace(' ', '')
                                             .split('\t')))
-        alignment = SelfAlignment(ab, ae, bb, be)
-        if alignment not in inner_alignments:
+        aln = SelfAlignment(ab, ae, bb, be)
+        if aln not in inner_alns:
             end = start
             continue
         aseq = ''.join(lines[start + 1:end:3])
@@ -117,6 +105,6 @@ def load_paths(read: TRRead,
         # Remove flanking sequences and convert symbol to CIGARs
         fcigar = convert_symbol(*map(lambda x: x[slice(*find_boundary(aseq, bseq))],
                                      [aseq, bseq, symbol]))
-        inner_paths[alignment] = fcigar
+        inner_paths[aln] = fcigar
         end = start
     return inner_paths

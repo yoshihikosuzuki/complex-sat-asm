@@ -8,7 +8,7 @@ from BITS.seq.util import revcomp_seq
 
 @dataclass(frozen=True)
 class SelfAlignment:
-    """`read.seq[ab:ae]` matches `read.seq[bb:be]`."""
+    """`read.seq[ab:ae]` aligns with `read.seq[bb:be]`."""
     ab: int
     ae: int
     bb: int
@@ -16,14 +16,15 @@ class SelfAlignment:
 
     @property
     def distance(self) -> int:
-        """From diagonal. Same as the length of the first unit."""
+        """Distance from diagonal in a dot plot. Corresponding to the length of
+        the first unit induced by this self alignment."""
         return self.ab - self.bb
 
     @property
     def slope(self) -> float:
-        """Represents how the self alignment is wobbling.
-        Units are unreliable if the value is large.
-        """
+        """Size of the slope of the line (ab, bb) - (ae, be).
+        Large value strongly implies this self alignment is noisy and probably
+        due to a small tandem repeat unit size."""
         return round((self.ae - self.ab) / (self.be - self.bb), 3)
 
 
@@ -54,15 +55,15 @@ class TRRead(DazzRecord):
 
     optional variables:
       @ strand       : 0 (forward) or 1 (revcomp)
-      @ alignments   : Outout of datander
-      @ trs          : Output of datander
-      @ units        : Initially computed by datruf
+      @ self_alns    : Self alignments detected by datander.
+      @ trs          : Tandem repeat intervals detected by datander.
+      @ units        : Tandem repeat units determined by datruf.
       @ repr_units   : `{repr_id: sequence}`. Assumed only forward sequences.
-      @ synchronized : Whether or not `self.units` are
-      @ qual         : Positional QVs on the sequence
+      @ synchronized : Specifies if boundaries of `units` are synchronized.
+      @ qual         : Positional QVs of `seq`.
     """
     strand: int = 0
-    alignments: Optional[List[SelfAlignment]] = None
+    self_alns: Optional[List[SelfAlignment]] = None
     trs: Optional[List[SeqInterval]] = None
     units: Optional[List[TRUnit]] = None
     repr_units: Optional[Dict[int, str]] = None
@@ -89,10 +90,10 @@ def revcomp_read(read: TRRead) -> TRRead:
     """Return reverse complement of TRRead as a new object."""
     seq = revcomp_seq(read.seq)
 
-    alignments = (None if read.alignments is None
-                  else [SelfAlignment(ab=read.length - aln.be, ae=read.length - aln.bb,
-                                      bb=read.length - aln.ae, be=read.length - aln.ab)
-                        for aln in reversed(read.alignments)])
+    self_alns = (None if read.self_alns is None
+                 else [SelfAlignment(ab=read.length - aln.be, ae=read.length - aln.bb,
+                                     bb=read.length - aln.ae, be=read.length - aln.ab)
+                       for aln in reversed(read.self_alns)])
     trs = (None if read.trs is None
            else [SeqInterval(start=read.length - tr.end, end=read.length - tr.start)
                  for tr in reversed(read.trs)])
@@ -111,7 +112,7 @@ def revcomp_read(read: TRRead) -> TRRead:
                   id=read.id,
                   name=read.name,
                   strand=1 - read.strand,
-                  alignments=alignments,
+                  self_alns=self_alns,
                   trs=trs,
                   units=units,
                   synchronized=read.synchronized,
