@@ -38,11 +38,12 @@ def find_units_single(read: TRRead,
         units = split_tr(aln.ab, aln.bb, fcigar)
         if len(units) < 2:   # at least duplication is required
             logger.debug(f"Read {read.id}: TR with {len(units)} units "
-                         f"(ab={aln.ab}, be={aln.be})")
+                         f"(distance={aln.distance})")
             continue
         cv_ulen = round(coeff_var([unit.length for unit in units]), 3)
         if cv_ulen >= max_cv:   # remove noisy self alignments
-            logger.debug(f"Read {read.id}: TR with CV = {cv_ulen}")
+            logger.debug(f"Read {read.id}: TR with CV = {cv_ulen} "
+                         f"(distance={aln.distance})")
             continue
         all_units += units
     return remove_overlapping_units(all_units)
@@ -63,20 +64,19 @@ def find_inner_alns(read: TRRead,
         if intvl_len(uncovered) < min_uncovered_len:   # TRs are mostly covered
             break
         intersect = uncovered & interval[aln.bb, aln.ae]
-
-        # TODO: this should be done only when the alignment is accepted?
         uncovered = subtract_intvl(uncovered, interval[aln.bb, aln.ae])
-
         if intvl_len(intersect) < min_uncovered_len:
             continue
         if not (1 - max_slope_dev <= aln.slope <= 1 + max_slope_dev):
-            logger.debug(f"Read {read.id}: abnormal slope = {aln.slope}")
+            logger.debug(f"Read {read.id}: abnormal slope = {aln.slope} "
+                         f"(distance={aln.distance})")
             continue
         if aln.ab > aln.be:   # at least duplication is required
-            logger.debug(f"Read {read.id}: ab = {aln.ab} > be = {aln.be}")
+            logger.debug(f"Read {read.id}: ab = {aln.ab} > be = {aln.be} "
+                         f"(distance={aln.distance})")
             continue
         inner_alns.add(aln)
-    logger.debug(f"Read {read.id}: inners = {inner_alns}")
+    #logger.debug(f"Read {read.id}: inners = {inner_alns}")
     return inner_alns
 
 

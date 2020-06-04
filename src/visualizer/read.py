@@ -8,7 +8,7 @@ from BITS.seq.align import EdlibRunner
 from BITS.seq.dotplot import DotPlot
 from BITS.plot.plotly import make_line, make_rect, make_scatter, make_layout, show_plot
 from ..datruf.io import load_tr_reads
-from ..datruf.core import find_inner_alignments
+from ..datruf.core import find_inner_alns
 from ..type import TRRead
 
 
