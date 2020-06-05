@@ -23,9 +23,9 @@ def plot_vs(a_read: TRRead,
                          y_range=(0, b_read.length),
                          x_grid=False, y_grid=False, y_reversed=True,
                          x_zeroline=False, y_zeroline=False,
+                         margin=dict(l=10, r=10, t=50, b=10),
                          shapes=shapes)
     layout["yaxis"]["scaleanchor"] = "x"
-    layout["margin"] = dict(l=10, r=10, t=50, b=10)   # TODO: adjust values
     show_plot(traces, layout)
 
 

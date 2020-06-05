@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Optional, List, Dict
 import numpy as np
 from BITS.seq.io import DazzRecord, SeqInterval
-from BITS.seq.align import Alignment, EdlibRunner
+from BITS.seq.align import EdlibAlignment, EdlibRunner
 from BITS.seq.util import revcomp_seq
 
 
@@ -41,7 +41,7 @@ class TRUnit(SeqInterval):
       @ repr_aln : Alignment information with the representative unit.
     """
     repr_id: Optional[int] = None
-    repr_aln: Optional[Alignment] = None
+    repr_aln: Optional[EdlibAlignment] = None
 
 
 @dataclass(eq=False)
@@ -69,6 +69,11 @@ class TRRead(DazzRecord):
     repr_units: Optional[Dict[int, str]] = None
     synchronized: bool = False
     qual: Optional[np.ndarray] = None
+
+    def __repr__(self) -> str:
+        return self._order_repr(["id", "name", "strand", "synchronized",
+                                 "repr_units", "units", "trs", "self_alns",
+                                 "seq", "qual"])
 
     def __post_init__(self):
         assert self.strand in (0, 1), "Strand must be 0 or 1"

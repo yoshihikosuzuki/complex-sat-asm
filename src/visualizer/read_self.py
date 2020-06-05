@@ -24,16 +24,16 @@ def plot_self(read: TRRead,
                          x_range=(0, read.length),
                          y_range=(0, read.length),
                          x_grid=False, y_grid=False, y_reversed=True,
+                         margin=dict(l=10, r=10, t=50, b=10),
                          shapes=shapes)
     layout["yaxis"]["scaleanchor"] = "x"
-    layout["margin"] = dict(l=10, r=10, t=50, b=10)
     show_plot(traces, layout)
 
 
 def read_to_tr_obj(read: TRRead, max_slope_dev: float) -> Tuple[List, List]:
     """Create objects for tandem repeats and self alignments."""
     traces, shapes = [], []
-    if read.trs is None:
+    if read.trs is None or len(read.trs) == 0:
         return traces, shapes
     # TRs on diagonal
     shapes += [make_line(tr.start, tr.start, tr.end, tr.end, width=3, col="black")
@@ -58,7 +58,7 @@ def read_to_tr_obj(read: TRRead, max_slope_dev: float) -> Tuple[List, List]:
 def read_to_unit_obj(read: TRRead, unit_dist_by: str) -> Tuple[List, List]:
     """Create objects for a heatmap of the distance matrix among units."""
     traces, shapes = [], []
-    if read.units is None:
+    if read.units is None or len(read.units) == 0:
         return traces, shapes
     # On diagonal
     has_aln = all([unit.repr_aln is not None for unit in read.units])

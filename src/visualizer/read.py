@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Union, Optional
+from logzero import logger
 from .read_self import plot_self
 from .read_vs import plot_vs
 from ..datruf.io import load_tr_reads
@@ -35,6 +36,10 @@ class TRReadViewer:
           @ plot_size    : Size of the plots.
         """
         a_read, b_read = self.load_read(a_read), self.load_read(b_read)
+        if _has_many_units(a_read) or _has_many_units(b_read):
+            logger.warn("# of units is too large to draw. Continue? [y/N]")
+            if input() != "y":
+                return
         if b_read is None:
             plot_self(a_read, unit_dist_by, max_slope_dev, plot_size)
         else:
@@ -43,3 +48,9 @@ class TRReadViewer:
     def load_read(self, read: Optional[Union[int, TRRead]]) -> Optional[TRRead]:
         return (read if not isinstance(read, int)
                 else load_tr_reads(read, read, self.db_fname, self.las_fname)[0])
+
+
+def _has_many_units(read: TRRead) -> bool:
+    return (read is not None
+            and read.units is not None
+            and len(read.units) >= 100)
