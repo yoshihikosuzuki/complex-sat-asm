@@ -2,9 +2,9 @@ from typing import Tuple, List
 import numpy as np
 from BITS.clustering.seq import ClusteringSeq
 from BITS.plot.plotly import make_line, make_rect, make_scatter, make_layout, show_plot
-from .read_col import ID_TO_COL, DIST_TO_COL
-from ..datruf.core import find_inner_alns
-from ..type import TRRead
+from csa.datruf.core import find_inner_alns
+from csa.type import TRRead
+from .col import ID_TO_COL, DIST_TO_COL
 
 
 def plot_self(read: TRRead,
@@ -39,9 +39,11 @@ def read_to_tr_obj(read: TRRead, max_slope_dev: float) -> Tuple[List, List]:
     shapes += [make_line(tr.start, tr.start, tr.end, tr.end, width=3, col="black")
                for tr in read.trs]
     # Start/end positions of each self alignment
-    ab, ae, bb, be = zip(*[(aln.ab, aln.ae, aln.bb, aln.be)
-                           for aln in read.self_alns])
-    traces += [make_scatter(ab, bb, name="start"),
+    ab, ae, bb, be, texts = zip(*[(aln.ab, aln.ae, aln.bb, aln.be,
+                                   f"({aln.ab}, {aln.bb})<br>"
+                                   f"distance={aln.distance}")
+                                  for aln in read.self_alns])
+    traces += [make_scatter(ab, bb, text=texts, name="start"),
                make_scatter(ae, be, name="end")]
     # Self alignments as lines
     inner_alns = find_inner_alns(read, max_slope_dev)

@@ -37,7 +37,7 @@ class DatrufRunner:
     db_fname: str
     las_fname: str
     max_cv: float = 0.1
-    max_slope_dev: float = 0.05   # TODO: integrate with CV?
+    max_slope_dev: float = 0.05
     scheduler: Optional[Scheduler] = None
     n_distribute: int = 1
     n_core: int = 1
@@ -68,7 +68,7 @@ class DatrufRunner:
         args = [(1 + i * n_unit,
                  min([1 + (i + 1) * n_unit - 1, self.n_reads]))
                 for i in range(n_split)]
-        logger.info(f"(start_dbid, end_dbid)={args}")
+        logger.debug(f"(start_dbid, end_dbid)={args}")
         return run_distribute(func=find_units_multi,
                               args=args,
                               shared_args=dict(db_fname=self.db_fname,

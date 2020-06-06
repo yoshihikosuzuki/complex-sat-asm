@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 from typing import Union, Optional
 from logzero import logger
-from .read_self import plot_self
-from .read_vs import plot_vs
-from ..datruf.io import load_tr_reads
-from ..type import TRRead
+from csa.datruf.io import load_tr_reads
+from csa.type import TRRead
+from .plot_self import plot_self
+from .plot_vs import plot_vs
 
 
 @dataclass(eq=False)

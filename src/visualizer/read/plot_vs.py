@@ -2,8 +2,8 @@ from typing import Tuple, List
 import numpy as np
 from BITS.seq.align import EdlibRunner
 from BITS.plot.plotly import make_line, make_rect, make_scatter, make_layout, show_plot
-from .read_col import ID_TO_COL, DIST_TO_COL
-from ..type import TRRead
+from csa.type import TRRead
+from .col import ID_TO_COL, DIST_TO_COL
 
 
 def plot_vs(a_read: TRRead,
