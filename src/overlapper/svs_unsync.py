@@ -1,17 +1,23 @@
-from typing import Optional, List, Tuple, Set
+from typing import NamedTuple, Optional, List, Tuple, Set
 from logzero import logger
 from BITS.seq.align import EdlibRunner
 from BITS.util.proc import NoDaemonPool
 from ..type import TRRead, Overlap
-from .type import BoundaryKUnit, Anchor
+from .read_spectrum import BoundaryKUnit
 from .align_proper import proper_alignment
 
-er_glocal = EdlibRunner("glocal", revcomp=False)
+
+class Anchor(NamedTuple):
+    """Pair of positions of a_read and b_read for computing proper overlaps,
+    where a_read.id < b_read.id and a_read is always forward."""
+    strand: int
+    a_pos: int
+    b_pos: int
 
 
 def svs_unsync(read_id_pairs: List[Tuple[int, int]],
-               _reads: List[TRRead],
-               _reads_rc: List[TRRead],
+               reads: List[TRRead],
+               reads_rc: List[TRRead],
                k_unit: int,
                min_kmer_ovlp: float,
                max_init_diff: float,
@@ -19,8 +25,7 @@ def svs_unsync(read_id_pairs: List[Tuple[int, int]],
                n_core: int) -> List[Overlap]:
     """Map forward sequences of boundary k-units of reads[read_indices] to
     both forward and revcomp sequences of the entire sequence of every read."""
-    global reads, reads_rc, reads_by_id, reads_rc_by_id
-    reads, reads_rc = _reads, _reads_rc
+    global reads_by_id, reads_rc_by_id
     reads_by_id = {read.id: read for read in reads}
     reads_rc_by_id = {read.id: read for read in reads_rc}
 
@@ -61,25 +66,33 @@ def svs_overlap_single(a_read_id: int,
         for boundary_read in (reads_by_id[boundary_read_id],
                               reads_rc_by_id[boundary_read_id]):
             for boundary_unit in boundary_read.boundary_units:
-                anchors += _find_anchors(boundary_read,
-                                         boundary_unit,
-                                         whole_read,
-                                         k_unit,
-                                         min_kmer_ovlp,
-                                         max_init_diff)
-    return list(filter(None, [calc_proper_overlap(a_read_id,
-                                                  b_read_id,
-                                                  anchor,
-                                                  max_diff)
-                              for anchor in sorted(set(anchors))]))
+                anchors += find_anchors(boundary_read,
+                                        boundary_unit,
+                                        whole_read,
+                                        k_unit,
+                                        min_kmer_ovlp,
+                                        max_init_diff)
+    overlaps = list(filter(None, [calc_proper_overlap(a_read_id,
+                                                      b_read_id,
+                                                      anchor,
+                                                      max_diff)
+                                  for anchor in sorted(set(anchors))]))
+    # TODO: reduce same overlaps
+    if len(anchors) > 0:
+        logger.debug(f"{a_read_id} vs {b_read_id}: "
+                     f"{len(anchors)} anchors -> {len(overlaps)} overlaps")
+    return overlaps
 
 
-def _find_anchors(boundary_read: TRRead,
-                  boundary_unit: BoundaryKUnit,
-                  whole_read: TRRead,
-                  k_unit: int,
-                  min_kmer_ovlp: float,
-                  max_init_diff: float) -> List[Anchor]:
+er_glocal = EdlibRunner("glocal", revcomp=False)
+
+
+def find_anchors(boundary_read: TRRead,
+                 boundary_unit: BoundaryKUnit,
+                 whole_read: TRRead,
+                 k_unit: int,
+                 min_kmer_ovlp: float,
+                 max_init_diff: float) -> List[Anchor]:
     """Map boundary k-units of `boundary_read` to (k+1)-units of `whole_read`."""
     def has_overlap(boundary_spec: Set[str],
                     whole_spec: Set[str]) -> bool:
@@ -104,19 +117,24 @@ def _find_anchors(boundary_read: TRRead,
     if er_glocal.align(boundary_seq, whole_read.seq).diff > max_init_diff:
         return []
     # Map the boundary k-unit of `a_read` to each (k+1)-unit of `b_read`
+    # NOTE: If the boundary k-unit contains insertions, smaller number of
+    #       mappings is obtained since longer overlaps are required.
     anchors = []
     for i in range(len(whole_read.units) - k_unit):
         whole_start = whole_read.units[i].start
         whole_end = whole_read.units[i + k_unit].end
+        # TODO: a k-unit can be longer than (k+1)-units due to insertions between units
+        #       so check it before mapping
         aln = er_glocal.align(boundary_seq,
                               whole_read.seq[whole_start:whole_end])
         if aln.diff <= max_init_diff:
             anchors.append(to_anchor(boundary_unit.start,
                                      whole_start + aln.b_start))
-    assert len(anchors) > 0, \
-        (f"Read {boundary_read.id}->{whole_read.id}"
-         f"{'' if whole_read.strand == 0 else '*'}: "
-         "mapped k-units to whole read but not to (k+1)-units")
+    logger.debug(f"{boundary_read.id}[{boundary_unit.start}:{boundary_unit.end}] "
+                 f"(strand={boundary_read.strand}) "
+                 f"-> {whole_read.id}: {len(anchors)} anchors")
+    if len(anchors) == 0:
+        logger.warning("Mapped to entire read but not to any (k+1)-units")
     return anchors
 
 

@@ -128,6 +128,7 @@ def revcomp_read(read: TRRead) -> TRRead:
 
 @dataclass(frozen=True, order=True)
 class Overlap:
+    """`a_read[a_start:a_end] == strand(b_read[b_start:b_end])`"""
     a_read_id: int
     b_read_id: int
     strand: int

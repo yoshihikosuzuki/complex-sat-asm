@@ -1,19 +1,15 @@
-from dataclasses import dataclass
-from typing import Set, NamedTuple
-from BITS.seq.io import SeqInterval
-
-
-@dataclass
-class BoundaryKUnit(SeqInterval):
-    """
-    inherited variables:
-      @ start
-      @ end
-    """
-    spec: Set[str]
+from typing import NamedTuple
 
 
 class Anchor(NamedTuple):
     strand: int
     a_pos: int
     b_pos: int
+
+
+class ProperOverlap(NamedTuple):
+    a_start: int
+    a_end: int
+    b_start: int
+    b_end: int
+    diff: float

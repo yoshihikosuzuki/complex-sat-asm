@@ -1,9 +1,16 @@
-from typing import Tuple
+from typing import NamedTuple, Tuple
 from BITS.seq.align import EdlibAlignment, EdlibRunner
 from BITS.seq.util import reverse_seq
-from .type import ProperOverlap
 
 er_prefix = EdlibRunner("prefix", revcomp=False)
+
+
+class ProperOverlap(NamedTuple):
+    a_start: int
+    a_end: int
+    b_start: int
+    b_end: int
+    diff: float
 
 
 def can_be_query(query: str,
