@@ -10,7 +10,8 @@ from .svs_unsync import svs_unsync
 
 @dataclass(eq=False)
 class UnsyncReadsOverlapper:
-    """Compute all-vs-all overlaps among unsynchronized TR reads using k-units.
+    """Compute all-vs-all overlaps among unsynchronized TR reads by mapping
+    boundary k-units of forward/revcomp reads to (k+1)-units of forward reads.
 
     positional arguments:
       @ reads_fname : File name of input TR reads.
@@ -47,11 +48,9 @@ class UnsyncReadsOverlapper:
         run_command(f"mkdir -p {self.tmp_dname}; rm -f {self.tmp_dname}/*")
 
     def run(self):
-        # NOTE: only forward reads have k-mer spectrum of the entire read,
-        #       i.e. boundary units of both forward and revcomp reads are
-        #       mapped to only forward reads.
         reads = load_pickle(self.reads_fname)
         reads_rc = [revcomp_read(read) for read in reads]
+        # Compute k-mer spectrums for initial screening of overlaps
         for read in reads:
             add_read_spec(read,
                           k_spectrum=self.k_spectrum)
