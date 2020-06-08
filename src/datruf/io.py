@@ -23,27 +23,28 @@ def load_tr_reads(start_dbid: int,
                    name=all_reads_by_id[read_id].name,
                    seq=all_reads_by_id[read_id].seq,
                    trs=tan_tracks_by_id[read_id],
-                   self_alns=sorted(sorted(self_alns_by_id[read_id],
-                                           key=lambda x: x.ab),
-                                    key=lambda x: x.distance))
+                   self_alns=self_alns_by_id[read_id])
             for read_id in tr_read_ids]
 
 
 def load_self_alns(db_fname: str,
                    las_fname: str,
-                   dbid_range: Tuple[int, int]) -> Dict[int, SelfAlignment]:
+                   dbid_range: Tuple[int, int]) -> Dict[int, List[SelfAlignment]]:
     alns = defaultdict(list)
     command = (f"LAdump -c {db_fname} {las_fname} "
                f"{'' if dbid_range is None else '-'.join(map(str, dbid_range))}")
     for line in run_command(command).strip().split('\n'):
         line = line.strip()
         if line.startswith('P'):
-            _, dazz_id, _, _, _ = line.split()
+            _, read_id, _, _, _ = line.split()
         elif line.startswith('C'):
             _, ab, ae, bb, be = line.split()
             ab, ae, bb, be = map(int, (ab, ae, bb, be))
-            alns[int(dazz_id)].append(SelfAlignment(ab, ae, bb, be))
-    return alns
+            alns[int(read_id)].append(SelfAlignment(ab, ae, bb, be))
+    # Sort by `distance` -> `ab`
+    return {read_id: sorted(sorted(self_alns, key=lambda x: x.ab),
+                            key=lambda x: x.distance)
+            for read_id, self_alns in alns.items()}
 
 
 def load_paths(read: TRRead,

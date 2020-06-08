@@ -94,25 +94,26 @@ class TRRead(DazzRecord):
 def revcomp_read(read: TRRead) -> TRRead:
     """Return reverse complement of TRRead as a new object."""
     seq = revcomp_seq(read.seq)
-
     self_alns = (None if read.self_alns is None
-                 else [SelfAlignment(ab=read.length - aln.be, ae=read.length - aln.bb,
-                                     bb=read.length - aln.ae, be=read.length - aln.ab)
-                       for aln in reversed(read.self_alns)])
+                 else sorted(sorted([SelfAlignment(ab=read.length - aln.be,
+                                                   ae=read.length - aln.bb,
+                                                   bb=read.length - aln.ae,
+                                                   be=read.length - aln.ab)
+                                     for aln in read.self_alns],
+                                    key=lambda x: x.ab),
+                             key=lambda x: x.distance))
     trs = (None if read.trs is None
-           else [SeqInterval(start=read.length - tr.end, end=read.length - tr.start)
+           else [SeqInterval(start=read.length - tr.end,
+                             end=read.length - tr.start)
                  for tr in reversed(read.trs)])
-
     er = EdlibRunner("global", cyclic=True if not read.synchronized else False)
-    units = []
-    for unit in reversed(read.units):
-        start, end = read.length - unit.end, read.length - unit.start
-        # TODO: revcomp repr_aln without recomputing
-        repr_aln = (None if unit.repr_aln is None
-                    else er.align(seq[start:end], read.repr_units[unit.repr_id]))
-        units.append(TRUnit(start=start, end=end,
-                            repr_id=unit.repr_id, repr_aln=repr_aln))
-
+    units = [TRUnit(start=read.length - unit.end,
+                    end=read.length - unit.start,
+                    repr_id=unit.repr_id,
+                    repr_aln=(None if unit.repr_aln is None
+                              else er.align(revcomp_seq(unit.seq),
+                                            read.repr_units[unit.repr_id])))
+             for unit in reversed(read.units)]
     return TRRead(seq=seq,
                   id=read.id,
                   name=read.name,
@@ -123,3 +124,17 @@ def revcomp_read(read: TRRead) -> TRRead:
                   synchronized=read.synchronized,
                   repr_units=read.repr_units,
                   qual=None if read.qual is None else np.flip(read.qual))
+
+
+@dataclass(frozen=True, order=True)
+class Overlap:
+    a_read_id: int
+    b_read_id: int
+    strand: int
+    a_start: int
+    a_end: int
+    a_len: int
+    b_start: int
+    b_end: int
+    b_len: int
+    diff: float
