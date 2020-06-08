@@ -2,13 +2,15 @@
 
 Complex satellites are tandem repeats with a large (e.g. >100 bp) unit size and a some sequence diversity among units.
 
-Our objective is a *de novo* assembler for any type of complex satellite.
+Our objective is a _de novo_ assembler for any type of complex satellite.
 
 Current implementaion supports only:
-- Explorative execution via e.g. Jupyter Notebook (i.e. no integrated command)
-- PacBio CCS a.k.a. HiFi reads (we developed with a [Drosophila 11kb dataset](https://www.ncbi.nlm.nih.gov/sra/SRX6717171))
+
+- Explorative execution via e.g. Jupyter Notebook (i.e. no integrated command from shell)
+- PacBio CCS a.k.a. HiFi reads (we developed mainly with a [40x subset](https://obj.umiacs.umd.edu/marbl_publications/hicanu/index.html) of [Drosophila 24 kb dataset](https://www.ncbi.nlm.nih.gov/sra/SRX6957826) used in the [HiCanu paper](https://www.biorxiv.org/content/10.1101/2020.03.14.992248v3))
 
 Current implementation requires:
+
 - Python3.7 (not 3.8)
 - Unpublished software named Consed (we will offer alternative codes)
 
@@ -41,4 +43,3 @@ $ bash BITS/script/add_jupyter_kernel.sh .venv CSA
 ```
 
 ## How to use
-

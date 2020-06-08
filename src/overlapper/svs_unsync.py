@@ -94,7 +94,6 @@ def svs_overlap_single(a_read_id: int,
                                else reads_by_id[b_read_id].length - aln.b_start),
                         b_len=reads_by_id[b_read_id].length,
                         diff=aln.diff))
-    # TODO: reduce same overlaps
     if len(anchors) > 0:
         logger.debug(f"{a_read_id} vs {b_read_id}: "
                      f"{len(anchors)} anchors -> {len(overlaps)} overlaps")
@@ -140,7 +139,7 @@ def find_anchors(boundary_read: TRRead,
         whole_start = whole_read.units[i].start
         whole_end = whole_read.units[i + k_unit].end
         whole_seq = whole_read.seq[whole_start:whole_end]   # (k+1)-unit
-        # NOTE: boundary k-unit can be longer than (k+1)-units due to insertions
+        # NOTE: Boundary k-unit can be longer than (k+1)-units due to insertions
         if can_be_query(boundary_seq, whole_seq):
             aln = er_glocal.align(boundary_seq, whole_seq)
             if aln.diff <= max_init_diff:
@@ -150,5 +149,8 @@ def find_anchors(boundary_read: TRRead,
                  f"(strand={boundary_read.strand}) "
                  f"-> {whole_read.id}: {len(anchors)} anchors")
     if len(anchors) == 0:
+        # NOTE: This is mostly due to large insertions in the boundary k-unit.
+        #       In most cases, other boundary k-units will complement this.
         logger.warning("Mapped to entire read but not to any (k+1)-units")
+
     return anchors

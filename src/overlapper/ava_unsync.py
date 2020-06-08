@@ -6,6 +6,7 @@ from BITS.util.scheduler import Scheduler, run_distribute
 from ..type import revcomp_read
 from .read_spectrum import add_read_spec, add_boundary_specs
 from .svs_unsync import svs_unsync
+from .filter_overlap import reduce_same_overlaps
 
 
 @dataclass(eq=False)
@@ -76,4 +77,5 @@ class UnsyncReadsOverlapper:
                                   n_core=self.n_core,
                                   tmp_dname=self.tmp_dname,
                                   out_fname=self.out_fname)
-        save_pickle(sorted(overlaps), self.out_fname)
+        save_pickle(sorted(reduce_same_overlaps(overlaps)),
+                    self.out_fname)
