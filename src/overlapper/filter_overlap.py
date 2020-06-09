@@ -68,3 +68,19 @@ def best_overlaps_per_pair(overlaps: List[Overlap]) -> List[Overlap]:
 def best_overlaps(overlaps):
     """Best-overlap logic, i.e., keep only one best in-edge and one best out-edge for each read."""
     pass
+
+
+def remove_contained_reads(overlaps: List[Overlap]) -> List[Overlap]:
+    """Remove overlaps involved with contained reads."""
+    contained_ids = set()
+    for o in overlaps:
+        if o.type == "contains":
+            contained_ids.add(o.b_read_id)
+        elif o.type == "contained":
+            contained_ids.add(o.a_read_id)
+    filtered_overlaps = list(filter(lambda o:
+                                    (o.a_read_id not in contained_ids
+                                     and o.b_read_id not in contained_ids),
+                                    overlaps))
+    logger.info(f"{len(overlaps)} -> {len(filtered_overlaps)} overlaps")
+    return filtered_overlaps

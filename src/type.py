@@ -1,5 +1,6 @@
+from __future__ import annotations
 from dataclasses import dataclass
-from typing import Optional, List, Dict
+from typing import NamedTuple, Optional, List, Dict, Tuple
 import numpy as np
 from BITS.seq.io import DazzRecord, SeqInterval
 from BITS.seq.align import EdlibAlignment, EdlibRunner
@@ -149,3 +150,125 @@ class Overlap:
     @property
     def length(self) -> int:
         return (self.a_end - self.a_start + self.b_end - self.b_start) // 2
+
+    @property
+    def type(self) -> str:
+        if self.a_start > 0:
+            if self.strand == 0:
+                if self.b_end == self.b_len:
+                    #    a.B            a.E
+                    #  a  -------------->
+                    #  b     ------->
+                    #      b.B      b.E
+                    return "contains"
+                else:
+                    #    a.B       a.E
+                    #  a  --------->
+                    #  b      ---------->
+                    #        b.B        b.E
+                    return "suffix-prefix"
+            else:
+                if self.b_start == 0:
+                    #    a.B            a.E
+                    #  a  -------------->
+                    #  b     <-------
+                    #      b.E      b.B
+                    return "contains"
+                else:
+                    #    a.B       a.E
+                    #  a  --------->
+                    #  b      <----------
+                    #        b.E        b.B
+                    return "suffix-suffix"
+        else:
+            if self.a_end == self.a_len:
+                #       a.B     a.E                  a.B     a.E
+                #  a     ------->         or   a      ------->
+                #  b  -------------->          b  <--------------
+                #    b.B            b.E          b.E            b.B
+                return "contained"
+            else:
+                if self.strand == 0:
+                    if self.b_start == 0:
+                        #    a.B         a.E
+                        #  a  ----------->
+                        #  b  ------->
+                        #    b.B     b.E
+                        return "contains"
+                    else:
+                        #        a.B        a.E
+                        #  a      ---------->
+                        #  b  --------->
+                        #    b.B       b.E
+                        return "prefix-suffix"
+                else:
+                    if self.b_end == self.b_len:
+                        #    a.B         a.E
+                        #  a  ----------->
+                        #  b  <-------
+                        #    b.E     b.B
+                        return "contains"
+                    else:
+                        #        a.B       a.E
+                        #  a      --------->
+                        #  b  <---------
+                        #    b.E       b.B
+                        return "prefix-prefix"
+
+    def to_edges(self) -> List[Edge]:
+        if self.type == "suffix-prefix":
+            return [Edge(source=f"{self.b_read_id}:B",
+                         target=f"{self.a_read_id}:B",
+                         length=self.a_start,
+                         diff=self.diff),
+                    Edge(source=f"{self.a_read_id}:E",
+                         target=f"{self.b_read_id}:E",
+                         length=self.b_len - self.b_end,
+                         diff=self.diff)]
+        elif self.type == "suffix-suffix":
+            return [Edge(source=f"{self.b_read_id}:E",
+                         target=f"{self.a_read_id}:B",
+                         length=self.a_start,
+                         diff=self.diff),
+                    Edge(source=f"{self.a_read_id}:E",
+                         target=f"{self.b_read_id}:B",
+                         length=self.b_start,
+                         diff=self.diff)]
+        elif self.type == "prefix-suffix":
+            return [Edge(source=f"{self.a_read_id}:B",
+                         target=f"{self.b_read_id}:B",
+                         length=self.b_start,
+                         diff=self.diff),
+                    Edge(source=f"{self.b_read_id}:E",
+                         target=f"{self.a_read_id}:E",
+                         length=self.a_len - self.a_end,
+                         diff=self.diff)]
+        else:   # prefix-prefix
+            return [Edge(source=f"{self.a_read_id}:B",
+                         target=f"{self.b_read_id}:E",
+                         length=self.b_len - self.b_end,
+                         diff=self.diff),
+                    Edge(source=f"{self.b_read_id}:B",
+                         target=f"{self.a_read_id}:E",
+                         length=self.a_len - self.a_end,
+                         diff=self.diff)]
+
+    def swap(self) -> Overlap:
+        """Swap a_read and b_read."""
+        return Overlap(a_read_id=self.b_read_id,
+                       b_read_id=self.a_read_id,
+                       strand=self.strand,
+                       a_start=self.b_start,
+                       a_end=self.b_end,
+                       a_len=self.b_len,
+                       b_start=self.a_start,
+                       b_end=self.a_end,
+                       b_len=self.a_len,
+                       diff=self.diff)
+
+
+class Edge(NamedTuple):
+    source: str
+    target: str
+    length: int
+    diff: float
