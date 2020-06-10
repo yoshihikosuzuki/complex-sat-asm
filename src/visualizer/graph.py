@@ -1,4 +1,4 @@
-from collections import Counter
+from collections import defaultdict, Counter
 from typing import Optional, Union, List, Dict
 import igraph as ig
 from BITS.plot.plotly import make_line, make_scatter, make_layout, show_plot
@@ -8,10 +8,9 @@ from ..type import TRRead
 def draw_string_graph(sg: ig.Graph,
                       reads: Optional[Union[List[TRRead], Dict[int, TRRead]]] = None,
                       kk_maxiter: int = 100000,
-                      node_size: int = 10,
+                      node_size: int = 8,
                       edge_width_per_bp: int = 5000,
-                      width: int = 1000,
-                      height: int = 1000):
+                      plot_size: int = 900):
     def v_to_read_id(v: ig.Vertex) -> int:
         return int(v["name"].split(':')[0])
 
@@ -54,20 +53,26 @@ def draw_string_graph(sg: ig.Graph,
                                                3),
                                      col=e_to_col[e],
                                      layer="below")]]
+    edge_info = defaultdict(list)
+    for e in sg.es:
+        edge_info[(e.source, e.target)].append(
+            f"{e['length']} bp, {e['diff'] * 100:.2f}% diff" if "diff" in e.attributes()
+            else f"{e['length']} bp")
     x, y, t, c = zip(*[
         ((coords[e.source][0] + coords[e.target][0]) / 2,
          (coords[e.source][1] + coords[e.target][1]) / 2,
-         f"{e['length']} bp, {e['diff'] * 100:.2f}% diff<br>"
-         f"{n_edges[(e.source, e.target)]} edge(s)",
+         f"{'<br>'.join(edge_info[(e.source, e.target)])}",
          e_to_col[e])
         for e in sg.es])
     trace_edge = make_scatter(x=x, y=y, text=t, col=c, marker_size=1)
     show_plot([trace_edge, trace_node],
-              make_layout(width=width,
-                          height=height,
+              make_layout(width=plot_size,
+                          height=plot_size,
                           x_grid=False,
                           y_grid=False,
                           x_zeroline=False,
                           y_zeroline=False,
+                          x_show_tick_labels=False,
+                          y_show_tick_labels=False,
                           margin=dict(l=0, r=0, b=0, t=0),
                           shapes=shapes))

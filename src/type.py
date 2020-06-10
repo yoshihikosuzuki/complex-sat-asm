@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import NamedTuple, Optional, List, Dict, Tuple
+from typing import Optional, List, Dict
 import numpy as np
 from BITS.seq.io import DazzRecord, SeqInterval
 from BITS.seq.align import EdlibAlignment, EdlibRunner
@@ -267,8 +267,17 @@ class Overlap:
                        diff=self.diff)
 
 
-class Edge(NamedTuple):
+@dataclass
+class Edge:
     source: str
     target: str
-    length: int
-    diff: float
+    length: int   # of overhang
+    diff: float   # of overlap
+
+
+@dataclass
+class Path:
+    source: str
+    target: str
+    length: int   # of overhang
+    edges: List[Edge]

@@ -1,17 +1,16 @@
-import copy
-from typing import List
+from typing import Union, Optional, List, Tuple, Dict
 from logzero import logger
 import igraph as ig
 from BITS.seq.util import revcomp_seq
-from ..type import Overlap
+from ..overlapper.filter_overlap import remove_contained_reads
+from ..type import TRRead, Overlap, Path
 
 
 def overlaps_to_string_graph(overlaps: List[Overlap]) -> ig.Graph:
     """Construct a string graph from overlaps."""
-    assert all([o.type not in ("contains", "contained") for o in overlaps]), \
-        "Contained reads must be removed in advance"
-    edges = {edge for o in overlaps for edge in o.to_edges()}
-    return ig.Graph.DictList(edges=[edge._asdict() for edge in edges],
+    return ig.Graph.DictList(edges=[vars(edge)
+                                    for o in remove_contained_reads(overlaps)
+                                    for edge in o.to_edges()],
                              vertices=None,
                              directed=True)
 
@@ -65,99 +64,132 @@ def reduce_transitive_edges(sg: ig.Graph,
     return reduced_sg
 
 
-def trace_edges(e, sg, direction, traced_edges=None):
-    """Trace a simple path starting from an edge `e` in a string graph `sg`
-    in `direction` (= "up" or "down"). A tuple of the last (branching or stopping) edge,
-    length and diff of the concatenated edge (= simple path), and the attributes of the
-    concatenated edge will be returned."""
-    assert direction in ("up", "down"), "Invalid direction"
-    if traced_edges is None:
-        traced_edges = []
-    e["status"] = "reduced"
-
-    in_edges = sg.incident(e.tuple[0 if direction == "up" else 1], mode="IN")
-    out_edges = sg.incident(e.tuple[0 if direction == "up" else 1], mode="OUT")
-    if (len(in_edges if direction == "up" else out_edges) != 1
-            or len(out_edges if direction == "up" else in_edges) > 1):
-        return traced_edges
-
-    next_edge = sg.es[in_edges[0] if direction == "up" else out_edges[0]]
-    #assert next_edge["status"] == "init", "Splitted simple path"
-    if next_edge["status"] != "init":
-        logger.warn(f"Cycle is detected. Check the graph.")
-        return traced_edges
-    if direction == "up":
-        traced_edges = [next_edge.attributes()] + traced_edges
-    else:
-        traced_edges += [next_edge.attributes()]
-    return trace_edges(next_edge, sg, direction=direction, traced_edges=traced_edges)
+def v_to_in_edges(v: Union[int, str, ig.Vertex],
+                  g: ig.Graph) -> List[ig.Edge]:
+    return list(g.es[g.incident(v, mode="IN")])
 
 
-def reduce_simple_paths(sg):
-    for e in sg.es:
+def v_to_out_edges(v: Union[int, str, ig.Vertex],
+                   g: ig.Graph) -> List[ig.Edge]:
+    return list(g.es[g.incident(v, mode="OUT")])
+
+
+def e_to_simple_path(e: ig.Edge,
+                     g: ig.Graph) -> List[ig.Edge]:
+    """Compute the maximal simple path induced from an edge."""
+    def e_to_in_simple_path(e: ig.Edge,
+                            g: ig.Graph,
+                            path: Optional[List[ig.Edge]] = None) -> List[ig.Edge]:
+        if path is None:
+            path = []
+        e["status"] = "visited"
+        in_edges = v_to_in_edges(e.source, g)
+        out_edges = v_to_out_edges(e.source, g)
+        if len(in_edges) != 1 or len(out_edges) > 1:
+            return path
+        else:
+            assert in_edges[0]["status"] == "init", f"Cycle\n{str(g)}"
+            return e_to_in_simple_path(in_edges[0], g, in_edges + path)
+
+    def e_to_out_simple_path(e: ig.Edge,
+                             g: ig.Graph,
+                             path: Optional[List[ig.Edge]] = None) -> List[ig.Edge]:
+        if path is None:
+            path = []
+        e["status"] = " visited"
+        in_edges = v_to_in_edges(e.target, g)
+        out_edges = v_to_out_edges(e.target, g)
+        if len(in_edges) > 1 or len(out_edges) != 1:
+            return path
+        else:
+            assert out_edges[0]["status"] == "init", f"Cycle:\n{str(g)}"
+            return e_to_out_simple_path(out_edges[0], g, path + out_edges)
+
+    return e_to_in_simple_path(e, g) + [e] + e_to_out_simple_path(e, g)
+
+
+def path_to_edge(path: List[ig.Edge],
+                 g: ig.Graph) -> Path:
+    length = sum([e["length"] for e in path])
+    return Path(source=g.vs[path[0].source]["name"],
+                target=g.vs[path[-1].target]["name"],
+                length=length,
+                edges=[e.attributes() for e in path])
+
+
+def reduce_simple_paths(g: ig.Graph) -> ig.Graph:
+    """Remove simple paths in the graph."""
+    for e in g.es:
         e["status"] = "init"
-    edges = []
-    for e in sg.es:
+    simple_paths = []
+    for e in g.es:
         if e["status"] != "init":
             continue
-        #logger.debug(f"Edge {e['source']} -> {e['target']}")
-        traced_edges = (trace_edges(e, sg, direction="up")
-                        + [e.attributes()]
-                        + trace_edges(e, sg, direction="down"))
-        length = sum([e["length"] for e in traced_edges])
-        # TODO: always 0.01?
-        diff = round(
-            100 * (sum([e["length"] * e["diff"] / 100 for e in traced_edges]) / length), 2)
-        edges.append(dict(source=traced_edges[0]["source"],
-                          target=traced_edges[-1]["target"],
-                          length=length, diff=diff, edges=traced_edges))
-
-    return ig.Graph.DictList(edges=edges, vertices=None, directed=True)
+        simple_paths.append(e_to_simple_path(e, g))
+    reduced_g = ig.Graph.DictList(edges=[vars(path_to_edge(path, g))
+                                         for path in simple_paths],
+                                  vertices=None,
+                                  directed=True)
+    logger.info(f"{g.vcount()} -> {reduced_g.vcount()} nodes")
+    logger.info(f"{g.ecount()} -> {reduced_g.ecount()} edges")
+    return reduced_g
 
 
-def remove_spur_edges(g):
-    sg = copy.deepcopy(g)
-    removed_edges = set()
-    for e in sg.es:
-        source, target = e.tuple
-        source_in_edges = sg.incident(source, mode="IN")
-        source_out_edges = sg.incident(source, mode="OUT")
-        target_in_edges = sg.incident(target, mode="IN")
-        target_out_edges = sg.incident(target, mode="OUT")
-        if len(target_out_edges) == 0 and len(source_out_edges) > 1:
-            removed_edges.add(e.index)
-        if len(source_in_edges) == 0 and len(target_in_edges) > 1:
-            removed_edges.add(e.index)
-    sg.delete_edges(list(removed_edges))
-    return sg
+def remove_spur_edges(g: ig.Graph) -> ig.Graph:
+    """Remove single-node dead-end branches from the graph."""
+    # TODO: remove longer branches
+    def is_spur(e: ig.Edge,
+                g: ig.Graph) -> bool:
+        s_in_edges = v_to_in_edges(e.source, g)
+        s_out_edges = v_to_out_edges(e.source, g)
+        t_in_edges = v_to_in_edges(e.target, g)
+        t_out_edges = v_to_out_edges(e.target, g)
+        if len(s_in_edges) == 0 and len(t_in_edges) > 1:
+            return True
+        elif len(t_out_edges) == 0 and len(s_out_edges) > 1:
+            return True
+        return False
+
+    removed_g = ig.Graph.DictList(edges=[e.attributes() for e in g.es
+                                         if not is_spur(e, g)],
+                                  vertices=None,
+                                  directed=True)
+    logger.info(f"{g.ecount()} -> {removed_g.ecount()} edges")
+    return removed_g
 
 
-def remove_revcomp_graph(sg):
+def remove_revcomp_graph(g: ig.Graph) -> List[ig.Graph]:
+    """Remove every connected component that is revcomp of another one."""
+    n_cc_prev = len(g.clusters(mode="weak").subgraphs())
     already_found = set()
     cc = []
-    for g in sg.clusters(mode="weak").subgraphs():
-        nodes = tuple(
-            sorted(set([int(v["name"].split(':')[0]) for v in g.vs])))
+    for gg in g.clusters(mode="weak").subgraphs():
+        nodes = tuple(sorted(set([int(v["name"].split(':')[0])
+                                  for v in gg.vs])))
         if nodes not in already_found:
             already_found.add(nodes)
-            cc.append(g)
+            cc.append(gg)
+    logger.info(f"{n_cc_prev} -> {len(cc)} connected components")
     return cc
 
 
-def edges_to_contig(edges, centromere_reads_by_id, include_first=True):
-    """Given `edges`, return a sequence generated by concatenating `edges`."""
+def edges_to_contig(edges: List[ig.Graph],
+                    reads_by_id: Dict[int, TRRead],
+                    include_first: bool = True) -> Tuple[str, str]:
+    """Generate contig sequence from edges."""
+    # TODO: check
     contig = ""
     if include_first:
         # The first read is fully contained in the contig
         read_id, node_type = edges[0]["source"].split(':')
         read_id = int(read_id)
-        contig = centromere_reads_by_id[read_id].seq
+        contig = reads_by_id[read_id].seq
         if node_type == 'B':
             contig = revcomp_seq(contig)
     # As for the other reads, concatenate overhanging regions
     for edge in edges:
         read_id, node_type = edge["target"].split(':')
         read_id = int(read_id)
-        contig += (centromere_reads_by_id[read_id].seq if node_type == 'E'
-                   else revcomp_seq(centromere_reads_by_id[read_id].seq))[-edge["length"]:]
+        contig += (reads_by_id[read_id].seq if node_type == 'E'
+                   else revcomp_seq(reads_by_id[read_id].seq))[-edge["length"]:]
     return contig
