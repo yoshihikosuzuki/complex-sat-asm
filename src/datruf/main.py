@@ -32,7 +32,7 @@ class DatrufRunner:
       @ n_core        : Number of cores used in each job.
                         `n_distribute * n_core` cores are used in total.
       @ out_fname     : Output pickle file name.
-      @ tmp_dname     : Relative path to a directory for intermediate files.
+      @ tmp_dname     : Name of directory for intermediate files.
     """
     db_fname: str
     las_fname: str
@@ -69,18 +69,19 @@ class DatrufRunner:
                         min([1 + (i + 1) * n_unit - 1, self.n_reads]))
                        for i in range(n_split)]
         logger.debug(f"(start_dbid, end_dbid)={dbid_ranges}")
-        return run_distribute(func=find_units_multi,
-                              args=dbid_ranges,
-                              shared_args=dict(db_fname=self.db_fname,
-                                               las_fname=self.las_fname,
-                                               max_cv=self.max_cv,
-                                               max_slope_dev=self.max_slope_dev),
-                              scheduler=self.scheduler,
-                              n_distribute=self.n_distribute,
-                              n_core=self.n_core,
-                              tmp_dname=self.tmp_dname,
-                              job_name="datruf",
-                              out_fname=self.out_fname)
+        return run_distribute(
+            func=find_units_multi,
+            args=dbid_ranges,
+            shared_args=dict(db_fname=self.db_fname,
+                             las_fname=self.las_fname,
+                             max_cv=self.max_cv,
+                             max_slope_dev=self.max_slope_dev),
+            scheduler=self.scheduler,
+            n_distribute=self.n_distribute,
+            n_core=self.n_core,
+            tmp_dname=self.tmp_dname,
+            job_name="datruf",
+            out_fname=self.out_fname)
 
 
 def find_units_multi(dbid_ranges: List[Tuple[int, int]],

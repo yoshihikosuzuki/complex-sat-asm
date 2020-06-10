@@ -42,7 +42,7 @@ class TRUnit(SeqInterval):
       @ repr_aln : Alignment information with the representative unit.
     """
     repr_id: Optional[int] = None
-    repr_aln: Optional[EdlibAlignment] = None
+    repr_aln: Optional[EdlibAlignment] = None   # repr -> unit; i.e. a_seq is unit
 
 
 @dataclass(eq=False)
@@ -111,6 +111,7 @@ def revcomp_read(read: TRRead) -> TRRead:
     units = [TRUnit(start=read.length - unit.end,
                     end=read.length - unit.start,
                     repr_id=unit.repr_id,
+                    # TODO: revcomp without recomputing
                     repr_aln=(None if unit.repr_aln is None
                               else er.align(revcomp_seq(unit.seq),
                                             read.repr_units[unit.repr_id])))

@@ -29,6 +29,7 @@ class UnsyncReadsOverlapper:
       @ n_core        : Number of cores used in each job.
                         `n_distribute * n_core` cores are used in total.
       @ out_fname     : Output pickle file name.
+      @ tmp_dname     : Name of directory for intermediate files.
     """
     reads_fname: str
     unit_offset: int = 1
@@ -64,18 +65,19 @@ class UnsyncReadsOverlapper:
                          for a_read in reads
                          for b_read in reads
                          if a_read.id < b_read.id]
-        overlaps = run_distribute(func=svs_unsync,
-                                  args=read_id_pairs,
-                                  shared_args=dict(reads=reads,
-                                                   reads_rc=reads_rc,
-                                                   k_unit=self.k_unit,
-                                                   min_kmer_ovlp=self.min_kmer_ovlp,
-                                                   max_init_diff=self.max_init_diff,
-                                                   max_diff=self.max_diff),
-                                  scheduler=self.scheduler,
-                                  n_distribute=self.n_distribute,
-                                  n_core=self.n_core,
-                                  tmp_dname=self.tmp_dname,
-                                  out_fname=self.out_fname)
+        overlaps = run_distribute(
+            func=svs_unsync,
+            args=read_id_pairs,
+            shared_args=dict(reads=reads,
+                             reads_rc=reads_rc,
+                             k_unit=self.k_unit,
+                             min_kmer_ovlp=self.min_kmer_ovlp,
+                             max_init_diff=self.max_init_diff,
+                             max_diff=self.max_diff),
+            scheduler=self.scheduler,
+            n_distribute=self.n_distribute,
+            n_core=self.n_core,
+            tmp_dname=self.tmp_dname,
+            out_fname=self.out_fname)
         save_pickle(sorted(reduce_same_overlaps(overlaps)),
                     self.out_fname)
