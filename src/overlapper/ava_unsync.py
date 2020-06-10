@@ -45,8 +45,6 @@ class UnsyncReadsOverlapper:
     tmp_dname: str = "unsync_ovlp"
 
     def __post_init__(self):
-        assert self.n_distribute == 1 or self.scheduler is not None, \
-            "`scheduler` is required when `n_distribute` > 1"
         run_command(f"mkdir -p {self.tmp_dname}; rm -f {self.tmp_dname}/*")
 
     def run(self):

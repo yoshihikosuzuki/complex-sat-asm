@@ -1,15 +1,15 @@
 from dataclasses import dataclass
 from typing import List, Tuple, Dict
+from copy import deepcopy
 from collections import Counter
 import numpy as np
-from copy import deepcopy
 from logzero import logger
 from BITS.clustering.seq import ClusteringSeq
 from BITS.seq.align import EdlibRunner
 from BITS.util.io import save_pickle, load_pickle
 from BITS.util.proc import NoDaemonPool, run_command
 from BITS.util.scheduler import Scheduler, run_distribute
-from ..types import TRRead, TRUnit, revcomp_read
+from ..type import TRRead, TRUnit, revcomp_read
 
 
 @dataclass(eq=False)
@@ -20,7 +20,6 @@ class ReadSynchronizer:
       @ reads_fname    : File of TR reads.
       @ overlaps_fname : File of overlaps between TR reads.
                          Overlapping reads will be synchronized.
-
 
     optional arguments:
       @ th_ward      : Distance threshold for hierarchical clustering of units.
@@ -42,8 +41,6 @@ class ReadSynchronizer:
     tmp_dname: str = "sync_reads"
 
     def __post_init__(self):
-        assert self.n_distribute == 1 or self.scheduler is not None, \
-            "`scheduler` is required when `n_distribute` > 1"
         run_command(f"mkdir -p {self.tmp_dname}; rm -f {self.tmp_dname}/*")
 
     def run(self):
@@ -77,8 +74,8 @@ def sync_reads(read_ids: List[int],
     reads_by_id = {read.id: read for read in reads}
     overlaps = load_pickle(overlaps_fname)
     with NoDaemonPool(n_core) as pool:
-        return list(pool.starmap(sync_reads, [(read_id, th_ward, th_map)
-                                              for read_id in read_ids]))
+        return list(pool.starmap(sync_read, [(read_id, th_ward, th_map)
+                                             for read_id in read_ids]))
 
 
 def sync_read(read_id: int,
@@ -133,8 +130,9 @@ def calc_sync_units(read: TRRead,
         fcigar = mapping.cigar.flatten()   # read -> repr unit
         # Ignore boundary units
         if not (start < 10 or read.length - end < 10):
-            # Convert boundary 'I' (of read) to 'X' to capture variants
-            assert fcigar[0] != 'D' and fcigar[-1] != 'D', "Boundary deletion"
+            # Convert boundary 'I' (to read) to 'X' to capture variants.
+            # Glocal alignment often causes this.
+            assert fcigar[0] != 'D' and fcigar[-1] != 'D', "No boundary deletion"
             insert_len = 0   # start side
             while fcigar[insert_len] == 'I':
                 insert_len += 1
