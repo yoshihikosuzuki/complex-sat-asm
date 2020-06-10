@@ -105,6 +105,7 @@ def reduce_simple_paths(sg):
                         + [e.attributes()]
                         + trace_edges(e, sg, direction="down"))
         length = sum([e["length"] for e in traced_edges])
+        # TODO: always 0.01?
         diff = round(
             100 * (sum([e["length"] * e["diff"] / 100 for e in traced_edges]) / length), 2)
         edges.append(dict(source=traced_edges[0]["source"],
