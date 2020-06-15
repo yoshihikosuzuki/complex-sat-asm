@@ -7,6 +7,7 @@ import igraph as ig
 import consed
 from BITS.seq.align import EdlibRunner
 from BITS.seq.cigar import Cigar
+from BITS.seq.alt_consensus import consensus_alt
 from BITS.seq.util import reverse_seq, revcomp_seq
 from ..type import TRRead, Overlap
 from ..overlapper.align_proper import can_be_query
@@ -357,8 +358,14 @@ def calc_cons(mappings: List[Mapping],
         logger.debug(f"Consensus by Consed: {len(cons_seq)} bp, "
                      f"{diff:.2f} %diff")
         if len(cons_seq) == 0:
-            assert False
-            # TODO: alt_consensus
+            logger.warning("Consed failed. Retry with alt_consensus")
+            cons_seq = consensus_alt(mapped_seqs,
+                                     seed_choice="median")
+            assert len(cons_seq) > 0, "alt_consensus failed"
+            diff = er_global.align(init_contig[window_start:window_end],
+                                   cons_seq).diff * 100
+            logger.debug(f"Consensus by alt_consensus: {len(cons_seq)} bp, "
+                         f"{diff:.2f} %diff")
         return cons_seq
 
     return ''.join([_calc_cons(i * window_size,
