@@ -1,9 +1,8 @@
-from typing import Union, Optional, List, Tuple, Dict
+from typing import Union, Optional, List
 from logzero import logger
 import igraph as ig
-from BITS.seq.util import revcomp_seq
 from ..overlapper.filter_overlap import remove_contained_reads
-from ..type import TRRead, Overlap, Path
+from ..type import Overlap, Path
 
 
 def overlaps_to_string_graph(overlaps: List[Overlap]) -> ig.Graph:
@@ -15,8 +14,23 @@ def overlaps_to_string_graph(overlaps: List[Overlap]) -> ig.Graph:
                              directed=True)
 
 
+def remove_revcomp_graph(g: ig.Graph) -> List[ig.Graph]:
+    """Remove every connected component that is revcomp of another one."""
+    n_cc_prev = len(g.clusters(mode="weak").subgraphs())
+    already_found = set()
+    cc = []
+    for gg in g.clusters(mode="weak").subgraphs():
+        nodes = tuple(sorted(set([int(v["name"].split(':')[0])
+                                  for v in gg.vs])))
+        if nodes not in already_found:
+            already_found.add(nodes)
+            cc.append(gg)
+    logger.info(f"{n_cc_prev} -> {len(cc)} connected components")
+    return cc
+
+
 def reduce_transitive_edges(sg: ig.Graph,
-                            fuzz: int = 20) -> ig.Graph:
+                            fuzz: int = 200) -> ig.Graph:
     """Reduce transitive edges [Myers, 2005].
     `fuzz` [bp] is the allowable difference in start/end positions between overlaps.
     """
@@ -75,46 +89,40 @@ def v_to_out_edges(v: Union[int, str, ig.Vertex],
 
 
 def e_to_simple_path(e: ig.Edge,
-                     g: ig.Graph) -> List[ig.Edge]:
+                     g: ig.Graph) -> Path:
     """Compute the maximal simple path induced from an edge."""
-    def e_to_in_simple_path(e: ig.Edge,
-                            g: ig.Graph,
+    def e_to_in_simple_path(edge: ig.Edge,
                             path: Optional[List[ig.Edge]] = None) -> List[ig.Edge]:
         if path is None:
             path = []
-        e["status"] = "visited"
-        in_edges = v_to_in_edges(e.source, g)
-        out_edges = v_to_out_edges(e.source, g)
+        edge["status"] = "visited"
+        in_edges = v_to_in_edges(edge.source, g)
+        out_edges = v_to_out_edges(edge.source, g)
         if len(in_edges) != 1 or len(out_edges) > 1:
             return path
         else:
             assert in_edges[0]["status"] == "init", f"Cycle\n{str(g)}"
-            return e_to_in_simple_path(in_edges[0], g, in_edges + path)
+            return e_to_in_simple_path(in_edges[0], in_edges + path)
 
-    def e_to_out_simple_path(e: ig.Edge,
-                             g: ig.Graph,
+    def e_to_out_simple_path(edge: ig.Edge,
                              path: Optional[List[ig.Edge]] = None) -> List[ig.Edge]:
         if path is None:
             path = []
-        e["status"] = " visited"
-        in_edges = v_to_in_edges(e.target, g)
-        out_edges = v_to_out_edges(e.target, g)
+        edge["status"] = " visited"
+        in_edges = v_to_in_edges(edge.target, g)
+        out_edges = v_to_out_edges(edge.target, g)
         if len(in_edges) > 1 or len(out_edges) != 1:
             return path
         else:
             assert out_edges[0]["status"] == "init", f"Cycle:\n{str(g)}"
-            return e_to_out_simple_path(out_edges[0], g, path + out_edges)
+            return e_to_out_simple_path(out_edges[0], path + out_edges)
 
-    return e_to_in_simple_path(e, g) + [e] + e_to_out_simple_path(e, g)
-
-
-def path_to_edge(path: List[ig.Edge],
-                 g: ig.Graph) -> Path:
-    length = sum([e["length"] for e in path])
-    return Path(source=g.vs[path[0].source]["name"],
-                target=g.vs[path[-1].target]["name"],
+    edges = e_to_in_simple_path(e) + [e] + e_to_out_simple_path(e)
+    length = sum([e["length"] for e in edges])
+    return Path(source=g.vs[edges[0].source]["name"],
+                target=g.vs[edges[-1].target]["name"],
                 length=length,
-                edges=[e.attributes() for e in path])
+                edges=[e.attributes() for e in edges])
 
 
 def reduce_simple_paths(g: ig.Graph) -> ig.Graph:
@@ -126,8 +134,7 @@ def reduce_simple_paths(g: ig.Graph) -> ig.Graph:
         if e["status"] != "init":
             continue
         simple_paths.append(e_to_simple_path(e, g))
-    reduced_g = ig.Graph.DictList(edges=[vars(path_to_edge(path, g))
-                                         for path in simple_paths],
+    reduced_g = ig.Graph.DictList(edges=[vars(path) for path in simple_paths],
                                   vertices=None,
                                   directed=True)
     logger.info(f"{g.vcount()} -> {reduced_g.vcount()} nodes")
@@ -156,40 +163,3 @@ def remove_spur_edges(g: ig.Graph) -> ig.Graph:
                                   directed=True)
     logger.info(f"{g.ecount()} -> {removed_g.ecount()} edges")
     return removed_g
-
-
-def remove_revcomp_graph(g: ig.Graph) -> List[ig.Graph]:
-    """Remove every connected component that is revcomp of another one."""
-    n_cc_prev = len(g.clusters(mode="weak").subgraphs())
-    already_found = set()
-    cc = []
-    for gg in g.clusters(mode="weak").subgraphs():
-        nodes = tuple(sorted(set([int(v["name"].split(':')[0])
-                                  for v in gg.vs])))
-        if nodes not in already_found:
-            already_found.add(nodes)
-            cc.append(gg)
-    logger.info(f"{n_cc_prev} -> {len(cc)} connected components")
-    return cc
-
-
-def edges_to_contig(edges: List[ig.Graph],
-                    reads_by_id: Dict[int, TRRead],
-                    include_first: bool = True) -> Tuple[str, str]:
-    """Generate contig sequence from edges."""
-    # TODO: check
-    contig = ""
-    if include_first:
-        # The first read is fully contained in the contig
-        read_id, node_type = edges[0]["source"].split(':')
-        read_id = int(read_id)
-        contig = reads_by_id[read_id].seq
-        if node_type == 'B':
-            contig = revcomp_seq(contig)
-    # As for the other reads, concatenate overhanging regions
-    for edge in edges:
-        read_id, node_type = edge["target"].split(':')
-        read_id = int(read_id)
-        contig += (reads_by_id[read_id].seq if node_type == 'E'
-                   else revcomp_seq(reads_by_id[read_id].seq))[-edge["length"]:]
-    return contig

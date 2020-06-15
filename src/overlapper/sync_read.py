@@ -29,6 +29,7 @@ class ReadSynchronizer:
       @ n_core       : Number of cores per job.
       @ out_fname    : Output file name.
       @ tmp_dname    : Name of directory for intermediate files.
+      @ verbose      : Output debug messages.
     """
     reads_fname: str
     overlaps_fname: str
@@ -39,6 +40,7 @@ class ReadSynchronizer:
     n_core: int = 1
     out_fname: str = "sync_reads.pkl"
     tmp_dname: str = "sync_reads"
+    verbose: bool = False
 
     def __post_init__(self):
         run_command(f"mkdir -p {self.tmp_dname}; rm -f {self.tmp_dname}/*")
@@ -59,7 +61,9 @@ class ReadSynchronizer:
             n_distribute=self.n_distribute,
             n_core=self.n_core,
             tmp_dname=self.tmp_dname,
-            out_fname=self.out_fname),
+            job_name="sync_reads",
+            out_fname=self.out_fname,
+            log_level="debug" if self.verbose else "info"),
             self.out_fname)
 
 
@@ -73,9 +77,18 @@ def sync_reads(read_ids: List[int],
     reads = load_pickle(reads_fname)
     reads_by_id = {read.id: read for read in reads}
     overlaps = load_pickle(overlaps_fname)
+    n_unit = -(-len(read_ids) // n_core)
     with NoDaemonPool(n_core) as pool:
-        return list(pool.starmap(sync_read, [(read_id, th_ward, th_map)
-                                             for read_id in read_ids]))
+        return list(pool.starmap(sync_read_multi,
+                                 [(read_ids[i * n_unit:(i + 1) * n_unit],
+                                   th_ward,
+                                   th_map)
+                                  for i in range(n_core)]))
+
+
+def sync_read_multi(read_ids: List[int],
+                    *args) -> List[Tuple[int, List[TRRead]]]:
+    return [sync_read(read_id, *args) for read_id in read_ids]
 
 
 def sync_read(read_id: int,
@@ -95,7 +108,7 @@ def sync_read(read_id: int,
     repr_units = calc_repr_units([unit_seq
                                   for read in reads
                                   for unit_seq in read.unit_seqs],
-                                 ward_threshold=th_ward)
+                                 th_ward=th_ward)
     for read in reads:
         calc_sync_units(read, repr_units, th_map=th_map)
     return read_id, reads

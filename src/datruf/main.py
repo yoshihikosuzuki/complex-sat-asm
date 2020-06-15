@@ -33,6 +33,7 @@ class DatrufRunner:
                         `n_distribute * n_core` cores are used in total.
       @ out_fname     : Output pickle file name.
       @ tmp_dname     : Name of directory for intermediate files.
+      @ verbose      : Output debug messages.
     """
     db_fname: str
     las_fname: str
@@ -43,6 +44,7 @@ class DatrufRunner:
     n_core: int = 1
     out_fname: str = "tr_reads.pkl"
     tmp_dname: str = "datruf"
+    verbose: bool = False
 
     def __post_init__(self):
         assert self.n_distribute == 1 or self.scheduler is not None, \
@@ -81,7 +83,8 @@ class DatrufRunner:
             n_core=self.n_core,
             tmp_dname=self.tmp_dname,
             job_name="datruf",
-            out_fname=self.out_fname)
+            out_fname=self.out_fname,
+            log_level="debug" if self.verbose else "info")
 
 
 def find_units_multi(dbid_ranges: List[Tuple[int, int]],

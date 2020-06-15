@@ -52,6 +52,7 @@ def filter_overlaps(overlaps: List[Overlap],
 
 def best_overlaps_per_pair(overlaps: List[Overlap]) -> List[Overlap]:
     """For each read pair (considering strand), keep only the best overlap."""
+    # TODO: what is "best" for overlaps? score? length?
     ovlp_by_pair = {}
     for o in overlaps:
         read_pair = (o.a_read_id, o.b_read_id, o.strand)

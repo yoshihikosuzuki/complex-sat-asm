@@ -42,7 +42,7 @@ class TRUnit(SeqInterval):
       @ repr_aln : Alignment information with the representative unit.
     """
     repr_id: Optional[int] = None
-    repr_aln: Optional[EdlibAlignment] = None   # repr -> unit; i.e. a_seq is unit
+    repr_aln: Optional[EdlibAlignment] = None   # repr -> unit
 
 
 @dataclass(eq=False)
@@ -255,7 +255,8 @@ class Overlap:
                          diff=self.diff)]
 
     def swap(self) -> Overlap:
-        """Swap a_read and b_read."""
+        """Swap a_read and b_read.
+        NOTE: No need for revcomp because positions are all on forward."""
         return Overlap(a_read_id=self.b_read_id,
                        b_read_id=self.a_read_id,
                        strand=self.strand,

@@ -9,7 +9,7 @@ import consed
 from BITS.clustering.seq import ClusteringSeq
 from BITS.seq.align import EdlibRunner
 from BITS.seq.alt_consensus import consensus_alt, count_discrepant_sites
-from BITS.seq.utils import phred_to_log10_p_error, phred_to_log10_p_correct
+from BITS.seq.util import phred_to_log10_p_error, phred_to_log10_p_correct
 from ..type import TRRead
 
 

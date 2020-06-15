@@ -30,6 +30,7 @@ class UnsyncReadsOverlapper:
                         `n_distribute * n_core` cores are used in total.
       @ out_fname     : Output pickle file name.
       @ tmp_dname     : Name of directory for intermediate files.
+      @ verbose      : Output debug messages.
     """
     reads_fname: str
     unit_offset: int = 1
@@ -43,6 +44,7 @@ class UnsyncReadsOverlapper:
     n_core: int = 1
     out_fname: str = "unsync_overlaps.pkl"
     tmp_dname: str = "unsync_ovlp"
+    verbose: bool = False
 
     def __post_init__(self):
         run_command(f"mkdir -p {self.tmp_dname}; rm -f {self.tmp_dname}/*")
@@ -76,6 +78,8 @@ class UnsyncReadsOverlapper:
             n_distribute=self.n_distribute,
             n_core=self.n_core,
             tmp_dname=self.tmp_dname,
-            out_fname=self.out_fname)
+            job_name="ava_uncync",
+            out_fname=self.out_fname,
+            log_level="debug" if self.verbose else "info")
         save_pickle(sorted(reduce_same_overlaps(overlaps)),
                     self.out_fname)
