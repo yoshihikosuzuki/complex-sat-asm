@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import List, Tuple, Dict
-from statistics import mean
+from statistics import mean, stdev
 from collections import defaultdict
 from logzero import logger
 import igraph as ig
@@ -11,16 +11,18 @@ from BITS.seq.util import reverse_seq, revcomp_seq
 from ..type import TRRead, Overlap
 from ..overlapper.align_proper import can_be_query
 
+er_global = EdlibRunner("global", revcomp=False)
+er_prefix = EdlibRunner("prefix", revcomp=False)
+
 
 def graph_to_contig(g: ig.Graph,
                     overlaps: List[Overlap],
                     reads_by_id: Dict[int, TRRead],
+                    max_diff: float,
                     window_size: int = 1000,
-                    max_diff: float = 0.02,
                     include_first_read: bool = True) -> List[str]:
     """Generate a contig sequence from each path in the graph."""
     # TODO: parallelize
-    er = EdlibRunner("global", revcomp=False, cyclic=False)
     contigs = []
     for e in list(g.es):
         edges = e["edges"]
@@ -36,9 +38,9 @@ def graph_to_contig(g: ig.Graph,
                                        reads_by_id,
                                        max_diff,
                                        window_size)
-        diff = er.align(init_contig, cons_contig).diff * 100
+        diff = er_global.align(init_contig, cons_contig).diff * 100
         logger.info(f"{len(init_contig)} bp -> {len(cons_contig)} bp "
-                    f"({diff:.2f}% diff)")
+                    f"({diff:.2f} %diff)")
         if diff > 1:
             logger.warning("Low consensus quality")
         contigs.append(cons_contig)
@@ -83,12 +85,12 @@ def consensus_contig(init_contig: str,
     # Choose best mapping for each read
     mappings = layouts_to_mappings(layouts, init_contig, reads_by_id, max_diff)
     # Compute consensus sequence for each window
-    return calc_cons(mappings, init_contig, reads_by_id, window_size)
+    return calc_cons(mappings, init_contig, reads_by_id, max_diff, window_size)
 
 
 @dataclass(frozen=True)
 class ReadLayout:
-    """NOTE: `strand(read)` starts at `rel_pos` on a specific coordinate system."""
+    """`strand(read)` starts at `rel_pos` on a specific coordinate system."""
     read_id: int
     strand: int
     rel_pos: int
@@ -96,8 +98,9 @@ class ReadLayout:
 
 @dataclass
 class Mapping:
-    """NOTE: strand(reads_by_id[read_id][read_start:read_end])
-             == cigar(contig_seq[contig_start:contig])
+    """
+    NOTE: `strand(reads_by_id[read_id][read_start:read_end])
+          == cigar(contig_seq[contig_start:contig])`
     """
     read_id: int
     strand: int
@@ -209,7 +212,6 @@ def calc_mapping(layout: ReadLayout,
     NOTE: Read should not contain a contig because contigs were generated only
           from non-contained reads.
     """
-    er_prefix = EdlibRunner("prefix", revcomp=False)
     read_seq = reads_by_id[layout.read_id].seq
     if layout.strand == 1:
         read_seq = revcomp_seq(read_seq)
@@ -293,6 +295,7 @@ def calc_mapping(layout: ReadLayout,
 def calc_cons(mappings: List[Mapping],
               init_contig: str,
               reads_by_id: Dict[int, TRRead],
+              max_diff: float,
               window_size: int) -> str:
     """Compute consensus sequence of the contig given mappings of reads
     for each window."""
@@ -312,7 +315,8 @@ def calc_cons(mappings: List[Mapping],
             fcigar_pos += 1
         # Compute mapped sequence of read within the window
         window_seq = ""
-        mapped_read_seq = mapping.mapped_read_seq(reads_by_id[mapping.read_id].seq)
+        read_forward_seq = reads_by_id[mapping.read_id].seq
+        mapped_read_seq = mapping.mapped_read_seq(read_forward_seq)
         while contig_pos < window_end:
             if fcigar[fcigar_pos] != 'I':
                 contig_pos += 1
@@ -325,24 +329,36 @@ def calc_cons(mappings: List[Mapping],
     def _calc_cons(window_start: int,
                    window_end: int) -> str:
         """Compute consensus sequence of `init_contig[window_start:window_end]`."""
+        # Sequences of mapped reads on the window
         mapped_seqs = [window_mapped_seq(mapping, window_start, window_end)
                        for mapping in mappings
                        if (mapping.contig_start <= window_start
                            and window_end <= mapping.contig_end)]
-        # TODO: return sequence of `init_contig` when no reads or consed fails?
-        assert len(mapped_seqs) > 0, \
-            "No reads for consensus. `window_size` is too large or contig is wrong."
+        logger.debug(f"Window {window_start}-{window_end}")
+        n_init_depth = len(mapped_seqs)
+        # Remove sequences with anormal lengths (3 sigma criterion)
+        mapped_lens = [len(s) for s in mapped_seqs]
+        mean_len = mean(mapped_lens)
+        stdev_len = stdev(mapped_lens) if len(mapped_seqs) > 1 else 0
+        min_len = int(mean_len - 3 * stdev_len)
+        max_len = int(mean_len + 3 * stdev_len)
+        mapped_seqs = list(filter(lambda s: min_len <= len(s) <= max_len,
+                                  mapped_seqs))
+        logger.debug(f"Seqs within {min_len}-{max_len} bp are used "
+                     f"({n_init_depth} -> {len(mapped_seqs)} reads)")
+        assert len(mapped_seqs) > 0, "No reads for consensus."
+        # Compute consensus sequence from the good mappings
         cons_seq = consed.consensus(mapped_seqs,
                                     seed_choice="median",
-                                    n_iter=3)
-        assert len(cons_seq) > 0, \
-            f"Window {window_start}-{window_end}: consensus failed"
-        # For debug
-        mapped_len_diffs = [str(len(mapped_seqs[0]) - len(x))
-                            for x in mapped_seqs]
-        logger.debug(f"Window {window_start}-{window_end} "
-                     f"(depth={len(mapped_seqs)}, cons={len(cons_seq)} bp): "
-                     f"{' '.join(mapped_len_diffs)}")
+                                    n_iter=2)
+        diff = (er_global.align(init_contig[window_start:window_end],
+                                cons_seq).diff * 100
+                if len(cons_seq) > 0 else 0.)
+        logger.debug(f"Consensus by Consed: {len(cons_seq)} bp, "
+                     f"{diff:.2f} %diff")
+        if len(cons_seq) == 0:
+            assert False
+            # TODO: alt_consensus
         return cons_seq
 
     return ''.join([_calc_cons(i * window_size,
