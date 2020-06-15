@@ -5,10 +5,12 @@ from collections import defaultdict
 from logzero import logger
 import igraph as ig
 import consed
+from BITS.seq.io import FastaRecord
 from BITS.seq.align import EdlibRunner
 from BITS.seq.cigar import Cigar
 from BITS.seq.alt_consensus import consensus_alt
 from BITS.seq.util import reverse_seq, revcomp_seq
+from BITS.util.proc import NoDaemonPool
 from ..type import TRRead, Overlap
 from ..overlapper.align_proper import can_be_query
 
@@ -20,32 +22,60 @@ def graph_to_contig(g: ig.Graph,
                     overlaps: List[Overlap],
                     reads_by_id: Dict[int, TRRead],
                     max_diff: float,
+                    contig_name_prefix: str = "cc",
                     window_size: int = 1000,
-                    include_first_read: bool = True) -> List[str]:
+                    include_first_read: bool = True,
+                    n_core: int = 1) -> List[FastaRecord]:
     """Generate a contig sequence from each path in the graph."""
-    # TODO: parallelize
+    edges_list = [(f"{contig_name_prefix}_{i}", e["edges"])
+                  for i, e in enumerate(g.es)]
+    n_part = -(-len(edges_list) // n_core)
     contigs = []
-    for e in list(g.es):
-        edges = e["edges"]
-        logger.info(f"Edge {e['source']} -> {e['target']}")
-        init_contig = edges_to_init_contig(edges,
-                                           reads_by_id,
-                                           include_first_read)
-        logger.info(f"Initial contig: {len(init_contig)} bp")
-        # TODO: return a FastaRecord
-        cons_contig = consensus_contig(init_contig,
-                                       edges,
-                                       overlaps,
-                                       reads_by_id,
-                                       max_diff,
-                                       window_size)
-        diff = er_global.align(init_contig, cons_contig).diff * 100
-        logger.info(f"{len(init_contig)} bp -> {len(cons_contig)} bp "
-                    f"({diff:.2f} %diff)")
-        if diff > 1:
-            logger.warning("Low consensus quality")
-        contigs.append(cons_contig)
+    with NoDaemonPool(n_core) as pool:
+        for ret in pool.starmap(_graph_to_contig_multi,
+                                [(edges_list[i * n_part:(i + 1) * n_part],
+                                  overlaps,
+                                  reads_by_id,
+                                  max_diff,
+                                  window_size,
+                                  include_first_read)
+                                 for i in range(n_core)]):
+            contigs += ret
     return contigs
+
+
+def _graph_to_contig_multi(edges_list: List[Tuple[str, List[Dict]]],
+                           *args) -> List[FastaRecord]:
+    return [_graph_to_contig(contig_name, edges, *args)
+            for contig_name, edges in edges_list]
+
+
+def _graph_to_contig(contig_name: str,
+                     edges: List[Dict],
+                     overlaps: List[Overlap],
+                     reads_by_id: Dict[int, TRRead],
+                     max_diff: float,
+                     window_size: int = 1000,
+                     include_first_read: bool = True) -> FastaRecord:
+    source, target = edges[0]['source'], edges[-1]['target']
+    logger.info(f"Edge {source} -> {target}")
+    init_contig = edges_to_init_contig(edges,
+                                       reads_by_id,
+                                       include_first_read)
+    logger.info(f"Initial contig: {len(init_contig)} bp")
+    cons_contig = consensus_contig(init_contig,
+                                   edges,
+                                   overlaps,
+                                   reads_by_id,
+                                   max_diff,
+                                   window_size)
+    diff = er_global.align(init_contig, cons_contig).diff * 100
+    logger.info(f"{len(init_contig)} bp -> {len(cons_contig)} bp "
+                f"({diff:.2f} %diff)")
+    if diff > 1.:
+        logger.warning("Low consensus quality")
+    return FastaRecord(name=f"{contig_name} {source} -> {target}",
+                       seq=cons_contig)
 
 
 def vname_to_read(vname: str) -> Tuple[int, int]:
