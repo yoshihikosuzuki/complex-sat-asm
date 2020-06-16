@@ -22,7 +22,7 @@ def graph_to_contig(g: ig.Graph,
                     overlaps: List[Overlap],
                     reads_by_id: Dict[int, TRRead],
                     max_diff: float,
-                    contig_name_prefix: str = "cc",
+                    contig_name_prefix: str = "contig",
                     window_size: int = 1000,
                     include_first_read: bool = True,
                     n_core: int = 1) -> List[FastaRecord]:
@@ -114,6 +114,7 @@ def consensus_contig(init_contig: str,
     # Compute relative positions of reads overlapping to the contig
     layouts = layout_reads(edges, overlaps)
     # Choose best mapping for each read
+    # TODO: output mappings as SAM file?
     mappings = layouts_to_mappings(layouts, init_contig, reads_by_id, max_diff)
     # Compute consensus sequence for each window
     return calc_cons(mappings, init_contig, reads_by_id, max_diff, window_size)

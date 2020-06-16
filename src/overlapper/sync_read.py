@@ -78,12 +78,15 @@ def sync_reads(read_ids: List[int],
     reads_by_id = {read.id: read for read in reads}
     overlaps = load_pickle(overlaps_fname)
     n_unit = -(-len(read_ids) // n_core)
+    sync_reads = []
     with NoDaemonPool(n_core) as pool:
-        return list(pool.starmap(sync_read_multi,
-                                 [(read_ids[i * n_unit:(i + 1) * n_unit],
-                                   th_ward,
-                                   th_map)
-                                  for i in range(n_core)]))
+        for ret in pool.starmap(sync_read_multi,
+                                [(read_ids[i * n_unit:(i + 1) * n_unit],
+                                  th_ward,
+                                  th_map)
+                                 for i in range(n_core)]):
+            sync_reads += ret
+    return sync_reads
 
 
 def sync_read_multi(read_ids: List[int],

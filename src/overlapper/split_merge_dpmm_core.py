@@ -98,7 +98,7 @@ def list_variations(template_unit, cluster_cons_unit):
     The return value is [(position_on_template_unit, variant_type, base_on_cluster_cons_unit)].
     """
     assert template_unit != "" and cluster_cons_unit != "", "Empty strings are not allowed"
-    return list(count_variants(template_unit, [cluster_cons_unit]).keys())
+    return list(count_discrepants(template_unit, [cluster_cons_unit]).keys())
 
 
 def log_prob_gen(cons_unit, obs_unit, obs_qual=None, p_non_match=0.01):
@@ -175,7 +175,7 @@ def log_prob_composition(cons_unit, obs_units, p_error=0.001):
     Concretely, compute Multinomial(n_A, ..., n_-; p_A, ..., p_-) for each position, where p_X = 1 - p_error
     if X is the base of <cons_unit>, otherwise p_X = p_error.
     """
-    var_counts = count_variants(cons_unit, obs_units)
+    var_counts = count_discrepants(cons_unit, obs_units)
     var_pos = [pos for pos, index, op, base in var_counts.keys()]
 
     # compute for matches
