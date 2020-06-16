@@ -13,7 +13,9 @@ def plot_vs(a_read: TRRead,
     assert a_read.synchronized and b_read.synchronized, \
         "Both reads must be synchronized"
     axis_traces, axis_shapes = reads_to_axis_obj(a_read, b_read)
-    matrix_traces, matrix_shapes = reads_to_matrix_obj(a_read, b_read)
+    matrix_traces, matrix_shapes = reads_to_matrix_obj(a_read,
+                                                       b_read,
+                                                       unit_dist_by)
     traces = axis_traces + matrix_traces
     shapes = axis_shapes + matrix_shapes
     layout = make_layout(plot_size, plot_size,
@@ -99,4 +101,4 @@ def reads_to_matrix_obj(a_read: TRRead,
         for j, b_unit in enumerate(b_read.units)])
     return ([make_scatter(x, y, text=texts, col=cols, marker_size=3,
                           col_scale="Blues", reverse_scale=True, show_scale=True)],
-            cells)
+            list(cells))

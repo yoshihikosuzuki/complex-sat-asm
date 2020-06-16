@@ -201,6 +201,7 @@ def calc_sync_units(read: TRRead,
                          end=unit.end,
                          repr_id=unit.repr_id,
                          repr_aln=er.align(read.seq[unit.start:unit.end],
-                                           repr_units[unit.repr_id]))]
+                                           repr_units[unit.repr_id]))
+                  for unit in sync_units]
     read.repr_units = repr_units
     read.synchronized = True
