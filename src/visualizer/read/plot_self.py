@@ -1,4 +1,4 @@
-from typing import Tuple, List
+from typing import Optional, Tuple, List
 import numpy as np
 from BITS.clustering.seq import ClusteringSeq
 from BITS.plot.plotly import make_line, make_rect, make_scatter, make_layout, show_plot
@@ -9,6 +9,7 @@ from .col import ID_TO_COL, DIST_TO_COL
 
 def plot_self(read: TRRead,
               unit_dist_by: str,
+              max_dist: Optional[float],
               max_slope_dev: float,
               plot_size: int):
     if unit_dist_by == "repr":
@@ -16,21 +17,25 @@ def plot_self(read: TRRead,
     read_shapes = [make_line(0, 0, read.length, read.length,
                              width=2, col="grey")]
     tr_traces, tr_shapes = read_to_tr_obj(read, max_slope_dev)
-    unit_traces, unit_shapes = read_to_unit_obj(read, unit_dist_by)
+    unit_traces, unit_shapes = read_to_unit_obj(read, unit_dist_by, max_dist)
     traces = tr_traces + unit_traces
     shapes = read_shapes + tr_shapes + unit_shapes
-    layout = make_layout(plot_size, plot_size,
+    layout = make_layout(plot_size,
+                         plot_size,
                          title=f"Read {read.id} (strand={read.strand})",
                          x_range=(0, read.length),
                          y_range=(0, read.length),
-                         x_grid=False, y_grid=False, y_reversed=True,
+                         x_grid=False,
+                         y_grid=False,
+                         y_reversed=True,
                          margin=dict(l=10, r=10, t=50, b=10),
                          shapes=shapes)
     layout["yaxis"]["scaleanchor"] = "x"
     show_plot(traces, layout)
 
 
-def read_to_tr_obj(read: TRRead, max_slope_dev: float) -> Tuple[List, List]:
+def read_to_tr_obj(read: TRRead,
+                   max_slope_dev: float) -> Tuple[List, List]:
     """Create objects for tandem repeats and self alignments."""
     traces, shapes = [], []
     if read.trs is None or len(read.trs) == 0:
@@ -57,7 +62,9 @@ def read_to_tr_obj(read: TRRead, max_slope_dev: float) -> Tuple[List, List]:
     return traces, shapes
 
 
-def read_to_unit_obj(read: TRRead, unit_dist_by: str) -> Tuple[List, List]:
+def read_to_unit_obj(read: TRRead,
+                     unit_dist_by: str,
+                     max_dist: Optional[float]) -> Tuple[List, List]:
     """Create objects for a heatmap of the distance matrix among units."""
     traces, shapes = [], []
     if read.units is None or len(read.units) == 0:
@@ -85,18 +92,23 @@ def read_to_unit_obj(read: TRRead, unit_dist_by: str) -> Tuple[List, List]:
                       cyclic=not read.synchronized)
     c.calc_dist_mat()
     dist_mat = c.s_dist_mat * 100
-    cols = DIST_TO_COL(dist_mat / np.max(dist_mat))
+    max_dist = np.max(dist_mat) if max_dist is None else max_dist
+    cols = DIST_TO_COL(np.clip(dist_mat, 0, max_dist) / max_dist)
     x, y, texts, cols, cells = zip(*[
         ((unit_i.start + unit_i.end) / 2,
          (unit_j.start + unit_j.end) / 2,
          f"Unit {i} (repr={unit_i.repr_id}) vs Unit {j} (repr={unit_j.repr_id})<br>"
          f"{dist_mat[i][j]:.2f}% diff ({unit_dist_by})",
-         cols[i][j],
+         dist_mat[i][j],
          make_rect(unit_i.start, unit_j.start, unit_i.end, unit_j.end,
                    fill_col=cols[i][j], layer="below"))
         for i, unit_i in enumerate(read.units)
         for j, unit_j in enumerate(read.units) if i < j])
-    traces += [make_scatter(x=x, y=y, text=texts, col=cols,
-                            marker_size=3, show_scale=True)]
+    traces += [make_scatter(x, y, text=texts, col=cols,
+                            marker_size=3,
+                            col_range=(0, max_dist),
+                            col_scale="Blues",
+                            reverse_scale=True,
+                            show_scale=True)]
     shapes += cells
     return traces, shapes
