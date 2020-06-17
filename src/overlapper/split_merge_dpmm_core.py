@@ -1,512 +1,372 @@
 from dataclasses import dataclass
-from typing import List, Tuple
-from collections import Counter, defaultdict
-from copy import deepcopy
+from typing import Optional, Sequence, List, Tuple
+from collections import defaultdict, Counter
 import random
 import numpy as np
 from logzero import logger
 import consed
 from BITS.clustering.seq import ClusteringSeq
-from BITS.seq.align import EdlibRunner
 from BITS.seq.alt_consensus import consensus_alt, count_discrepants
-from BITS.seq.util import phred_to_log10_p_error, phred_to_log10_p_correct
-from ..type import TRRead
+from BITS.seq.util import phred_to_log10_p_correct, phred_to_log10_p_error
 
 
-def run_smdc(read_id: int,
-             reads: List[TRRead],
-             th_ward: float,
-             alpha: float,
-             n_core: int = 1,
-             plot: bool = False) -> Tuple[int, List[TRRead]]:
-    assert all([read.synchronized for read in reads]), "Synchronize first"
-    smdc = SplitMergeDpmmClustering(*sync_reads_to_smdc_inputs(reads),
-                                    alpha=alpha,
-                                    read_id=read_id)
-    # Initial clustering
-    c = ClusteringSeq(smdc.units, revcomp=False)
-    c.calc_dist_mat(n_core=n_core)
-    if plot:
-        c.show_dendrogram()
-    c.cluster_hierarchical(threshold=th_ward)
-    # TODO: remove single "outlier" units
-    # (probably from regions covered only once by these reads right here)
-    smdc.assignments = c.assignment
-    smdc.do_gibbs()
+@dataclass(repr=False, eq=False)
+class ClusteringSeqSMD(ClusteringSeq):
+    """Clustering of sequences with DPMM and split-merge sampling.
 
-    # Do samplings until convergence
-    prev_p = smdc.log_prob_clustering()
-    p_counts = Counter()   # for oscillation
-    count, inf_count = 0, 0
-    while count < 2:
-        smdc.do_proposal(max(smdc.n_clusters() * 10, 100))
-        smdc.do_gibbs()
-        p = smdc.log_prob_clustering()
+    NOTE: Input sequences must be forward and synchronized.
 
-        if p == -np.inf or prev_p == -np.inf:
-            logger.debug(f"Read {read_id}: -inf prob. Retry.")
-            inf_count += 1
-            if inf_count >= 5:
-                logger.warn(
-                    f"Read {read_id}: Non-resolvable -inf prob. Abort.")
-                break
-            continue
+    positional variables:
+      @ data    : Array of data to be clustered.
+      @ quals   : Positional QVs for each sequence.
+      @ alpha   : Concentration hyperparameter.
+      @ p_error : Average sequencing error rate. [0, 1]
 
-        logger.debug(
-            f"Read {read_id}: {smdc.n_clusters()} clusters, prob {int(prev_p)} -> {int(p)} ({count})")
+    optional variables:
+      @ names     : Display name for each data.
 
-        if p_counts[int(p)] >= 5:   # oscillation
-            logger.debug(f"Oscillation at read {read_id}. Stop.")
-            break
-
-        if int(p) == int(prev_p):
-            count += 1
-        else:
-            count = 0
-
-        prev_p = p
-        p_counts[int(p)] += 1
-
-    logger.debug(f"Finished read {read_id}")
-    return read_id, smdc_outputs_to_reads(smdc, reads)
-
-
-def sync_reads_to_smdc_inputs(sync_reads):
-    # units/quals = [read1_unit1, read1_unit2, ..., read1_unitN, read2_unit1, ..., read_L_unit_M]
-    units = [unit_seq for read in sync_reads for unit_seq in read.unit_seqs]
-    quals = [qual for read in sync_reads for qual in read.unit_quals]
-    return (units, quals)
-
-
-def smdc_outputs_to_reads(smc, sync_reads):
-    repr_units = {cluster_id: smc.cluster_cons(
-        cluster_id) for cluster_id in smc.cluster_ids()}
-    labeled_reads = [deepcopy(read) for read in sync_reads]
-    assignment_index = 0
-    for read in labeled_reads:
-        read.repr_units = repr_units
-        for unit in read.units:
-            unit.repr_id = smc.assignments[assignment_index]
-            assignment_index += 1
-    return labeled_reads
-
-
-def list_variations(template_unit, cluster_cons_unit):
-    """Single-vs-single version of count_variants().
-    That is, list up the differences between the (imaginary) template unit and the consensus unit
-    of a cluster (which should be a real instance).
-    The return value is [(position_on_template_unit, variant_type, base_on_cluster_cons_unit)].
+    uninitialized variables:
+      @ N           : Number of data.
+      @ assignments : Cluster assignment for each data.
+      @ er          : EdlibRunner (global, forward).
     """
-    assert template_unit != "" and cluster_cons_unit != "", "Empty strings are not allowed"
-    return list(count_discrepants(template_unit, [cluster_cons_unit]).keys())
 
+    def __init__(self,
+                 data: Sequence[str],
+                 quals: List[np.ndarray],
+                 alpha: float,
+                 p_error: float,
+                 names: Optional[List[str]] = None):
+        self.data = data
+        self.quals = quals
+        self.alpha = alpha
+        self.p_error = p_error
+        self.names = names
+        super().__post_init__(revcomp=False, cyclic=False)
+        # Caches
+        self._cache_logp_cluster = {}   # {tuple(data_ids): logp_cluster}
+        self._cache_cons_seq = {}   # {tuple(data_ids): cons_seq}
+        # Precompute constants
+        self._log_factorial = np.zeros(self.N + 1, dtype=np.float32)
+        self._log_factorial[0] = -np.inf
+        for i in range(2, self.N + 1):
+            self._log_factorial[i] = self._log_factorial[i - 1] + np.log10(i)
+        self._const_ewens = -np.sum([np.log10(self.alpha + i)
+                                     for i in range(self.N)])
+        # NOTE: unnecessary for "deterministic" Gibbs sampling
+        #self._const_gibbs = -np.log10(self.N - 1 + self.alpha)
 
-def log_prob_gen(cons_unit, obs_unit, obs_qual=None, p_non_match=0.01):
-    """Log likelihood of generating <obs_unit> from <cons_unit>.
-    <obs_qual> is positional QVs of <obs_unit> and if not given,
-    <p_non_match> is used as average error rate for every position.
-    """
-    if cons_unit == "":   # input sequences for <cons_unit> were empty; or, Consed did not return
-        return -np.inf
+    def show(self):
+        for cons in sorted(self._generate_consensus(),
+                           key=lambda x: x.cluster_id):
+            print(f"Cluster {cons.cluster_id} "
+                  f"({cons.length} bp cons, {cons.cluster_size} seqs):")
+            seq_ids = self.cluster(cons.cluster_id, return_where=True)
+            assert len(seq_ids) == cons.cluster_size
+            for seq_id in seq_ids:
+                aln = self.er.align(cons.seq, self.data[seq_id])
+                print("---")
+                aln.show(a_name="cons",
+                         b_name=f"seq{seq_id}",
+                         twist_plot=True)
 
-    # Compute alignment
-    er = EdlibRunner("global", revcomp=False)
-    fcigar = er.align(cons_unit, obs_unit).cigar.flatten().string
-    # logger.debug(fcigar)
+    @property
+    def cluster_ids(self) -> List[int]:
+        return sorted(set(self.assignments))
 
-    # Calculate the sum of log probabilities for each position in the alignment
-    if obs_qual is None:
-        n_match = Counter(fcigar)['=']
-        n_non_match = len(fcigar) - n_match
-        return n_match * np.log10(1 - p_non_match) + n_non_match * np.log10(p_non_match)
-    else:
-        p = 0.
-        pos = 0
-        for c in fcigar:
-            p += (phred_to_log10_p_correct(obs_qual[pos]) if c == '='
-                  else phred_to_log10_p_error(obs_qual[pos]))
-            if c in ('=', 'X', 'D'):
-                pos += 1
-        assert pos == len(obs_unit) == len(obs_qual), "Invalid length"
+    def normalize_assignments(self):
+        table = {cluster_id: i
+                 for i, cluster_id in enumerate(self.cluster_ids)}
+        for i in range(self.N):
+            self.assignments[i] = table[self.assignments[i]]
+
+    def cluster_except(self,
+                       cluster_id: int,
+                       data_id: Optional[int] = None,
+                       return_where: bool = False) -> np.ndarray:
+        """Return data in the cluster except `data_id` if specified."""
+        where = np.where(self.assignments == cluster_id)[0]
+        return (where[where != data_id] if return_where
+                else self.data[where[where != data_id]])
+
+    def clusters_except(self,
+                        data_id: int,
+                        return_where: bool = False) -> List[Tuple[int, np.ndarray]]:
+        """Return cluster ID and data in each cluster except `data_id`."""
+        data_cluster_id = self.assignments[data_id]
+        return [(cluster_id,
+                 self.cluster(cluster_id, return_where)
+                 if cluster_id != data_cluster_id
+                 else self.cluster_except(cluster_id,
+                                          data_id,
+                                          return_where))
+                for cluster_id in self.cluster_ids]
+
+    def cluster_size(self,
+                     cluster_id: int,
+                     except_id: Optional[int] = None) -> int:
+        return len(self.cluster_except(cluster_id,
+                                       except_id,
+                                       return_where=True))
+
+    def cluster_cons_seq(self,
+                         cluster_id: int,
+                         except_id: Optional[int] = None) -> str:
+        # TODO: except の時は cache に残さない？
+        #       その場合、except_id が cluster_id に含まれているかどうかで場合わけ
+        data_ids = tuple(self.cluster_except(cluster_id,
+                                             except_id,
+                                             return_where=True))
+        if data_ids in self._cache_cons_seq:
+            logger.debug("cluster_cons_seq: cache hit "
+                         f"(cluster {cluster_id} except {except_id})")
+            return self._cache_cons_seq[data_ids]
+        seqs = list(self.cluster_except(cluster_id, except_id))
+        if len(seqs) == 0:   # The cluster has disappeared
+            return ""
+        cons_seq = consed.consensus(seqs, seed_choice="median")
+        if cons_seq == "":
+            logger.warning("Consed failed. Try alt_consensus")
+            cons_seq = consensus_alt(seqs, seed_choice="median")
+            assert len(cons_seq) > 0
+        self._cache_cons_seq[data_ids] = cons_seq
+        return cons_seq
+
+    def logp_clustering(self) -> float:
+        """Compute the joint probability of the clustering state."""
+        p = (self._logp_ewens()
+             + np.sum([self._logp_cluster(cluster_id)
+                       for cluster_id in self.cluster_ids]))
+        assert p != -np.inf, "-inf probability"
         return p
 
+    def _logp_ewens(self) -> float:
+        return (self._const_ewens
+                + self.n_clusters * np.log10(self.alpha)
+                + np.sum([self._log_factorial[self.cluster_size(cluster_id) - 1]
+                          for cluster_id in self.cluster_ids]))
 
-def log_prob_align(unit_x, unit_y, qual_x=None, qual_y=None, p_error=0.01):
-    """Log likelihood of alignment between <unit_x> from <unit_y>.
-    <qual_*> is positional QVs of <unit_*> and if not given,
-    <p_error> is used as average error rate for every position of each read.
-    """
-    # Compute alignment
-    er = EdlibRunner("global", revcomp=False)
-    fcigar = er.align(unit_x, unit_y).cigar.flatten().string
-    # logger.debug(fcigar)
-
-    # Calculate the sum of log probabilities for each position in the alignment
-    if qual_x is None and qual_y is None:
-        p_match = (1 - p_error) * (1 - p_error)
-        n_match = Counter(fcigar)['=']
-        n_non_match = len(fcigar) - n_match
-        return n_match * np.log10(p_match) + n_non_match * np.log10(1 - p_match)
-    else:
-        p = 0.
-        pos_x = pos_y = 0
-        for c in fcigar:   # fcigar(unit_y) = unit_x
-            p_match = phred_to_log10_p_correct(
-                qual_x[pos_x]) + phred_to_log10_p_correct(qual_y[pos_y])
-            p += (p_match if c == '='
-                  else np.log10(1 - np.power(10, p_match)))
-            if c in ('=', 'X', 'I'):
-                pos_x += 1
-            if c in ('=', 'X', 'D'):
-                pos_y += 1
-        assert pos_x == len(unit_x) == len(qual_x) and pos_y == len(
-            unit_y) == len(qual_y), "Invalid length"
+    def _logp_cluster(self,
+                      cluster_id: int) -> float:
+        data_ids = tuple(self.cluster(cluster_id, return_where=True))
+        if data_ids in self._cache_logp_cluster:
+            logger.debug("_logp_cluster: cache hit "
+                         f"(cluster {cluster_id})")
+            return self._cache_logp_cluster[data_ids]
+        p = (self._logp_cluster_composition(cluster_id)
+             + self._logp_seqs_generate(cluster_id))
+        self._cache_logp_cluster[data_ids] = p
         return p
 
+    def _logp_cluster_composition(self,
+                                  cluster_id: int) -> float:
+        cons_seq = self.cluster_cons_seq(cluster_id)
+        obs_seqs = self.cluster(cluster_id)
 
-def log_factorial(n):
-    return np.sum([np.log10(i) for i in range(1, n + 1)])
+        ######################### TODO: refactor #############################
 
+        if cons_seq == "":
+            return -np.inf
 
-# TODO: use positional QVs
-def log_prob_composition(cons_unit, obs_units, p_error=0.001):
-    """Log likelihood of composition of <obs_units> given <cons_unit> as a seed; i.e., probability of alignment pileup.
-    <p_error> is used for average sequencing error rate (= non-match rate in a single alignment).
-    Concretely, compute Multinomial(n_A, ..., n_-; p_A, ..., p_-) for each position, where p_X = 1 - p_error
-    if X is the base of <cons_unit>, otherwise p_X = p_error.
-    """
-    var_counts = count_discrepants(cons_unit, obs_units)
-    var_pos = [pos for pos, index, op, base in var_counts.keys()]
+        dis_counts = count_discrepants(cons_seq, obs_seqs)
+        dis_pos = [dis.seed_pos for dis in dis_counts.keys()]
 
-    # compute for matches
-    n_matches = len(cons_unit) - len(set(var_pos))
-    p_match = n_matches * len(obs_units) * np.log10(1 - p_error)
+        # compute for matches
+        n_matches = len(cons_seq) - len(set(dis_pos))
+        p_match = n_matches * len(obs_seqs) * np.log10(1 - self.p_error)
 
-    # compute for variants
-    # {(pos, index): Counter('A': n_A, ..., '-': n_-)} for each variant column
-    var_freqs = defaultdict(Counter)
-    # list up frequencies of each variant for each position
-    for (pos, index, op, base), count in var_counts.items():
-        var_freqs[(pos, index)][base] = count
-    log_factorial_N = log_factorial(len(obs_units))
-    p_var = 0.
-    for key, counts in var_freqs.items():   # for each variant position
-        p_var += log_factorial_N
-        for base, count in counts.items():
-            p_var -= log_factorial(count)
-            p_var += count * np.log10(p_error)
-        # number of units having base same as seed
-        n_match = len(obs_units) - np.sum(list(counts.values()))
-        p_var -= log_factorial(n_match)
-        p_var += n_match * np.log10(1 - p_error)
+        # compute for variants
+        # {(pos, index): Counter('A': n_A, ..., '-': n_-)} for each variant column
+        dis_freqs = defaultdict(Counter)
+        # list up frequencies of each variant for each position
+        for dis, count in dis_counts.items():
+            dis_freqs[(dis.seed_pos, dis.extra_pos)][dis.base] = count
+        log_factorial_N = self._log_factorial[len(obs_seqs)]
+        p_dis = 0.
+        for _, counts in dis_freqs.items():   # for each variant position
+            p_dis += log_factorial_N
+            for base, count in counts.items():
+                p_dis -= self._log_factorial[count]
+                p_dis += count * np.log10(self.p_error)
+            # number of units having base same as seed
+            n_match = len(obs_seqs) - np.sum(list(counts.values()))
+            p_dis -= self._log_factorial[n_match]
+            p_dis += n_match * np.log10(1 - self.p_error)
 
-    return p_match + p_var
+        return p_match + p_dis
 
+        ######################################################################
 
-def normalize_assignments(assignments):
-    """Convert a clustering state <assignments> so that all essentially equal states can be
-    same array. Return value type is Tuple so that it can be hashed as a dict key.
-    """
-    convert_table = {}
-    new_id = 0
-    for cluster_id in assignments:
-        if cluster_id not in convert_table:
-            convert_table[cluster_id] = new_id
-            new_id += 1
-    return tuple([convert_table[cluster_id] for cluster_id in assignments])
+    def _logp_seqs_generate(self,
+                            cluster_id: int) -> float:
+        cons_seq = self.cluster_cons_seq(cluster_id)
+        if cons_seq == "":
+            return -np.inf
+        return np.sum([self._logp_seq_generate(cons_seq, data_id)
+                       for data_id in self.cluster(cluster_id,
+                                                   return_where=True)])
 
+    def _logp_seq_generate(self,
+                           cons_seq: str,
+                           data_id: int) -> float:
+        obs_seq = self.data[data_id]
+        obs_qual = self.quals[data_id]
 
-@dataclass(eq=False)
-class SplitMergeDpmmClustering:
-    units: List[str]
-    quals: np.ndarray
-    alpha: float
-    read_id: int
+        ######################### TODO: refactor #############################
 
-    def __post_init__(self):
-        self.N = len(self.units)   # number of data
-        self.assignments = np.zeros(
-            [self.N], dtype=np.int16)   # cluster assignments
+        if cons_seq == "":
+            return -np.inf
 
-        # Compute all-vs-all unit alignment likelihood
-        #self.log_p_mat = np.zeros([self.N, self.N], dtype=np.float32)
-        # for i in range(self.N):
-        #    for j in range(i + 1, self.N):
-        #        self.log_p_mat[i][j] = self.log_p_mat[j][i] = log_prob_align(self.units[i], self.units[j],
-        #                                                                    self.quals[i], self.quals[j])
+        # Compute alignment
+        fcigar = self.er.align(cons_seq, obs_seq).cigar.flatten()
 
-        # Cache for values computationally expensive
-        self.cache_log_prob_clustering = {}   # {normalized_assignments: probability}
-        self.cache_cluster_cons = {}   # {unit_ids: cluster_cons}
-
-        # Pre-compute some constants
-        self.const_ewens = -np.sum([np.log10(self.alpha + i)
-                                    for i in range(self.N)])
-        self.const_gibbs = -np.log10(self.N - 1 + self.alpha)
-
-        # Compute consensus unit of the whole units so that comparing clusters can be easy
-        #self.template_unit = self.cluster_cons(0)
-
-    def show_clustering(self):
-        er = EdlibRunner("global", revcomp=False)
-        for cluster_id in np.unique(self.assignments):
-            print(f"Cluster {cluster_id} ({len(self.cluster_units(cluster_id))} units):\n"
-                  f"{self.cluster_unit_ids(cluster_id)}\n"
-                  f"{self.cluster_cons(cluster_id)}\n"
-                  f"{er.align(self.cluster_cons(cluster_id), self.template_unit).cigar.flatten().string}")
-            print("---")
-            for unit in self.cluster_units(cluster_id):
-                print(
-                    f"{er.align(unit, self.cluster_cons(cluster_id)).cigar.flatten().string}")
-
-    def n_units(self, cluster_id, assignments=None, exclude_unit=None):
-        """Return the number of units in the cluster <cluster_id> given a clustering state <assignments>,
-        while excluding a unit <exclude_unit> if provided."""
-        return len(self.cluster_unit_ids(cluster_id, assignments, exclude_unit))
-
-    def cluster_unit_ids(self, cluster_id, assignments=None, exclude_unit=None):
-        """Return indices of the units belonging to the cluster <cluster_id> given a clustering state <assignments>,
-        while excluding a unit <exclude_unit> if provided."""
-        if assignments is None:
-            assignments = self.assignments
-        unit_ids = np.where(assignments == cluster_id)[0]
-        if exclude_unit is not None:
-            unit_ids = unit_ids[np.where(unit_ids != exclude_unit)]
-        return unit_ids
-
-    def cluster_units(self, cluster_id, assignments=None, exclude_unit=None):
-        """Return unit sequences belonging to the cluster <cluster_id> given a clustering state <assignments>,
-        while excluding a unit <exclude_unit> if provided."""
-        return [self.units[i] for i in self.cluster_unit_ids(cluster_id, assignments, exclude_unit)]
-
-    def n_clusters(self, assignments=None):
-        """Return the number of clusters."""
-        return len(self.cluster_ids(self.assignments if assignments is None else assignments))
-
-    def cluster_ids(self, assignments=None):
-        """Return a list of cluster indices."""
-        return np.unique(self.assignments if assignments is None else assignments)
-
-    def cluster_cons(self, cluster_id, assignments=None, exclude_unit=None):
-        """Return the consensus sequence of the units belonging to the cluster <cluster_id> given a clustering state <assignments>,
-        while excluding a unit <exclude_unit> if provided."""
-        # Check the cache
-        cluster_units = set(self.cluster_units(cluster_id, assignments))
-        excluded = False
-        if exclude_unit is None or exclude_unit not in cluster_units:
-            if tuple(sorted(cluster_units)) in self.cache_cluster_cons:
-                return self.cache_cluster_cons[tuple(sorted(cluster_units))]
+        # Calculate the sum of log probabilities for each position in the alignment
+        if obs_qual is None:
+            p_non_match = 0.01   # TODO: magic number for CCS!
+            n_match = Counter(fcigar)['=']
+            n_non_match = len(fcigar) - n_match
+            return (n_match * np.log10(1 - p_non_match)
+                    + n_non_match * np.log10(p_non_match))
         else:
-            cluster_units.remove(exclude_unit)
-            excluded = True
-        cluster_units = sorted(cluster_units)
+            p = 0.
+            pos = 0
+            for c in fcigar:
+                p += (phred_to_log10_p_correct(obs_qual[pos]) if c == '='
+                      else phred_to_log10_p_error(obs_qual[pos]))
+                if c in ('=', 'X', 'D'):
+                    pos += 1
+            assert pos == len(obs_seq), "Invalid CIGAR"
+            return p
 
-        # cluster_units = self.cluster_units(cluster_id, assignments, exclude_unit)   # units belonging to the cluster
-        if len(cluster_units) == 0:   # cluster with single unit which is excluded
-            cons = ""
-        elif len(cluster_units) == 1:   # cluster with single unit
-            # TODO: NOTE: single data cluster can be harmful!
-            cons = cluster_units[0]
-        else:
-            cons = consed.consensus(cluster_units,
-                                    seed_choice="median",
-                                    error_msg=f"read {self.read_id}")
-            if cons == "":
-                logger.info("Use alt_consensus")
-                cons = consensus_alt(cluster_units, seed_choice="median")
+        ######################################################################
 
-        if not excluded:
-            self.cache_cluster_cons[tuple(cluster_units)] = cons
-        return cons
+    def gibbs_full(self,
+                   n_iter: int):
+        """Perform full scans of Gibbs sampling."""
+        p_old = self.logp_clustering()
+        self._gibbs(list(range(self.N)), self.cluster_ids, n_iter)
+        p_new = self.logp_clustering()
+        logger.info(f"Full Gibbs x{n_iter}: {p_old:.0f} -> {p_new:.0f}")
 
-    def log_prob_ewens(self, assignments=None):
-        """Return the probability of partition."""
-        p = self.n_clusters() * np.log10(self.alpha)
-        for cluster_id in self.cluster_ids(assignments):
-            p += log_factorial(self.n_units(cluster_id, assignments) - 1)
-        return p + self.const_ewens
+    def _gibbs_restricted(self,
+                          cluster_i: int,
+                          cluster_j: int,
+                          n_iter: int):
+        """Perform resticted Gibbs sampling among the two clusters."""
+        data_ids = np.concatenate([self.cluster(cluster_i, return_where=True),
+                                   self.cluster(cluster_j, return_where=True)])
+        self._gibbs(data_ids, [cluster_i, cluster_j], n_iter)
 
-    def log_prob_cluster_composition(self, cluster_id, assignments=None, p_error=0.001):
-        """Return log probability of the composition of the cluster <cluster_id> given a clustering state <assignments>"""
-        return log_prob_composition(self.cluster_cons(cluster_id, assignments),
-                                    self.cluster_units(cluster_id, assignments))
+    def _gibbs(self,
+               data_ids: Sequence[int],
+               cluster_ids: Sequence[int],
+               n_iter: int):
+        """Perform Gibbs sampling within specified data and clusters."""
+        for t in range(n_iter):
+            for data_id in data_ids:
+                self.assignments[data_id] = self._gibbs_single(data_id,
+                                                               cluster_ids)
 
-    def log_prob_units_generation(self, cluster_id, assignments=None):
-        """Return log probability of generating the units belonging to a cluster <cluster_id> from the cluster
-        given a clustering state <assignments>."""
-        cons = self.cluster_cons(cluster_id, assignments)
-        return np.sum([log_prob_gen(cons, unit) for unit in self.cluster_units(cluster_id, assignments)])
-
-    def log_prob_clustering(self, assignments=None):
-        """Compute the joint probability of the current clustering state."""
-        # Check the cache
-        normalized_assignments = normalize_assignments(
-            self.assignments if assignments is None else assignments)
-        if normalized_assignments in self.cache_log_prob_clustering:
-            #logger.debug(f"Found in cache")
-            return self.cache_log_prob_clustering[normalized_assignments]
-
-        # First of all, check if consensus sequence exists for every cluster
-        for cluster_id in self.cluster_ids(assignments):
-            cons = self.cluster_cons(cluster_id, assignments)
-            if cons == "":   # Consed did not return
-                logger.warn(
-                    f"No consensus @ read {self.read_id}, cluster {cluster_id}")
-                return -np.inf
-
-        p_ewens = self.log_prob_ewens(assignments)
-        p_cluster_compositions = np.sum([self.log_prob_cluster_composition(cluster_id, assignments)
-                                         for cluster_id in self.cluster_ids(assignments)])
-        p_gen_units = np.sum([self.log_prob_units_generation(cluster_id, assignments)
-                              for cluster_id in self.cluster_ids(assignments)])
-
-        p = p_ewens + p_cluster_compositions + p_gen_units
-        self.cache_log_prob_clustering[normalized_assignments] = p
-        return p
-
-    def gibbs_sampling_single(self, unit_id, cluster_ids, assignments):
-        """Compute probability of the unit assignment for each cluster while excluding the unit."""
-        # NOTE: here assignment to a new cluster is not considered because of its very low probability
-        # weights = tuple(map(lambda log_p: np.power(10, log_p),
-        #                    [(np.log10(self.n_units(cluster_id, assignments, exclude_unit=unit_id))
-        #                      - np.log10(self.N - 1 + self.alpha)
-        #                      + log_prob_gen(self.cluster_cons(cluster_id, assignments, exclude_unit=unit_id),
-        #                                  self.units[unit_id]))
-        #                     for cluster_id in cluster_ids]))
-        # new_assignment = random.choices(cluster_ids, weights=weights)[0]   # sample a new cluster assignment based on the probabilities
-        #logger.debug(f"weights: {weights}, {assignments[unit_id]} -> {new_assignment}")
-        # return new_assignment
-
-        # NOTE: below is a proxy of Gibbs sampling; deterministically decide the nearest cluster as assignment
-        max_prob = 0.
+    def _gibbs_single(self,
+                      data_id: int,
+                      cluster_ids: Sequence[int]) -> int:
+        """Assign a single data to one of the clusters."""
+        max_logp = -np.inf
         max_cluster_id = -1
-        #logger.debug(f"Unit {unit_id}")
         for cluster_id in cluster_ids:
-            #logger.debug(f"Cluster {cluster_id}")
-            log_p = (np.log10(self.n_units(cluster_id, assignments, exclude_unit=unit_id))
-                     + self.const_gibbs
-                     + log_prob_gen(self.cluster_cons(cluster_id, assignments, exclude_unit=unit_id),
-                                    self.units[unit_id]))
-            p = np.power(10, log_p)
-            if p > max_prob:
-                max_prob = p
+            cluster_size = self.cluster_size(cluster_id,
+                                             except_id=data_id)
+            if cluster_size == 0:
+                continue
+            cons_seq = self.cluster_cons_seq(cluster_id,
+                                             except_id=data_id)
+            logp = (0.  # self.const_gibbs
+                    + np.log10(cluster_size)
+                    + self._logp_seq_generate(cons_seq, data_id))   # TODO: cache logp_gen?
+            if logp > max_logp:
+                max_logp = logp
                 max_cluster_id = cluster_id
         return max_cluster_id
 
-    def gibbs_sampling(self, unit_ids, cluster_ids, assignments, n_iter=1):
-        """Re-assign each unit of <unit_ids> into one of the clusters <cluster_ids>,
-        Given a clustering state <assignments>.
-        """
-        for t in range(n_iter):
-            #logger.debug(f"Round {t}")
-            for unit_id in unit_ids:
-                # logger.debug(assignments)
-                #old_assignment = assignments[unit_id]
-                assignments[unit_id] = self.gibbs_sampling_single(
-                    unit_id, cluster_ids, assignments)
-                #new_assignment = assignments[unit_id]
-                #logger.debug(f"Unit {unit_id}: {old_assignment} -> {new_assignment}")
-        return assignments
-
-    def do_gibbs(self, n_iter=2):
-        """Run a single iteration of Gibbs sampling with all units."""
-        p_old = self.log_prob_clustering()
-        self.assignments = self.gibbs_sampling(
-            list(range(self.N)), self.cluster_ids(), self.assignments, n_iter)
-        p_new = self.log_prob_clustering()
-        if p_old != -np.inf and p_new != -np.inf:
-            logger.debug(f"State prob by Gibbs: {int(p_old)} -> {int(p_new)}")
-        else:
-            logger.debug(f"-inf @ Read {self.read_id}")
-        # logger.debug(self.assignments)
-
-    def do_proposal(self, n_iter=30):
-        """Propose a new state by choosing random two units."""
-        p_old = self.log_prob_clustering()
+    def split_merge(self,
+                    n_iter: int,
+                    split_init_how: str = "random",
+                    split_gibbs_n_iter: int = 2):
+        p_old = self.logp_clustering()
         for t in range(n_iter):
             if t % 10 == 0:
                 logger.debug(f"Proposal {t}/{n_iter}")
-            x, y = random.sample(list(range(self.N)), 2)
-            #logger.debug(f"Selected: {x}({self.assignments[x]}) and {y}({self.assignments[y]})")
-            if self.assignments[x] == self.assignments[y]:
-                # logger.debug("Split")
-                self.propose_split(x, y)
-            else:
-                pass
-                # logger.debug("Merge")
-                self.propose_merge(x, y)
-        p_new = self.log_prob_clustering()
-        if p_old != -np.inf and p_new != -np.inf:
-            logger.debug(f"State prob by split: {int(p_old)} -> {int(p_new)}")
-        else:
-            logger.debug(f"-inf @ {self.read_id}")
+            self._split_merge_single(split_init_how,
+                                     split_gibbs_n_iter)
+        p_new = self.logp_clustering()
+        logger.info(f"SM x{n_iter}: {p_old:.0f} -> {p_new:.0f}")
 
-    def propose_split(self, x, y, n_gibbs_iter=2):
-        # Split cluster <old_cluster_id> into <old_cluster_id> and <new_cluster_id>
-        old_cluster_id = self.assignments[x]
+    def _split_merge_single(self,
+                            split_init_how: str,
+                            split_gibbs_n_iter: int):
+        data_i, data_j = random.sample(list(range(self.N)), 2)
+        if self.assignments[data_i] == self.assignments[data_j]:
+            self._split(data_i,
+                        data_j,
+                        split_init_how,
+                        split_gibbs_n_iter)
+        else:
+            self._merge(data_i, data_j)
+
+    def _split(self,
+               data_i: int,
+               data_j: int,
+               init_how: str,
+               gibbs_n_iter: int):
+        def random_assignments():
+            self.assignments[data_j] = new_cluster_id
+            for i in self.cluster(old_cluster_id, return_where=True):
+                assert i != data_j
+                if i == data_i:
+                    continue
+                self.assignments[i] = random.choice((old_cluster_id,
+                                                     new_cluster_id))
+
+        def nearest_assignments():
+            # NOTE: 収束は早くなるがクラスタリング精度は下がると思われる(よりEM的になる)
+            pass
+
+        assert init_how in ("random", "nearest"), \
+            "`init_how` must be one of {'random', 'nearest'}"
+        original_assignments = np.copy(self.assignments)
+        p_current = self.logp_clustering()
+        # Cluster IDs after split; one is same as the original cluster
+        old_cluster_id = self.assignments[data_i]
         new_cluster_id = np.max(self.assignments) + 1
-        new_assignments = np.copy(self.assignments)
-
-        # Assign each unit to one of x and y randomly   # TODO: random assignment or sequential [Dahl]?
-        new_assignments[y] = new_cluster_id
-        for i in range(self.N):
-            if i != x and i != y and new_assignments[i] == old_cluster_id:
-                new_assignments[i] = random.choice(
-                    (old_cluster_id, new_cluster_id))
-                # if self.log_p_mat[i][x] < self.log_p_mat[i][y]:
-                #    new_assignments[i] = new_cluster_id
-
-        # Re-assign each unit to one of the new clusters (= Gibbs sampling)
-        self.gibbs_sampling(self.cluster_unit_ids(old_cluster_id),
-                            (old_cluster_id, new_cluster_id),
-                            new_assignments, n_iter=n_gibbs_iter)
-        # logger.debug(
-        #    f"\nCurrent state:\n{self.assignments}\nProposed state (Gibbs):\n{new_assignments}")
-
-        # Compare the probability of the current state and the proposed state
-        p_current = self.log_prob_clustering()
-        p_new = self.log_prob_clustering(new_assignments)
+        logger.debug(f"split {old_cluster_id} -> {old_cluster_id}, {new_cluster_id}")
+        # Initial assignments of the data in the cluster into one of the two clusters
+        if init_how == "random":
+            random_assignments()
+        else:
+            nearest_assignments()
+        logger.debug(f"Initial assignments:\n{self.assignments}")
+        # Restricted Gibbs sampling within the two clusters
+        self._gibbs_restricted(old_cluster_id,
+                               new_cluster_id,
+                               n_iter=gibbs_n_iter)
         logger.debug(
-            f"Current prob: {int(p_current)}, Proposed prob (split): {int(p_new)}")
-        if p_current < p_new:
-            # logger.debug("Accepted")
-            logger.debug(
-                f"\nCurrent state:\n{self.assignments}\nAccepted state (split):\n{new_assignments}")
-            self.assignments = new_assignments
+            f"Assignments after restricted Gibbs:\n{self.assignments}")
+        # Accept the proposal if the probability increases
+        p_propose = self.logp_clustering()
+        if p_current < p_propose:
+            logger.debug(f"Split: {p_current:.0f} -> {p_propose:.0f}")
+            self.normalize_assignments()
         else:
-            # logger.debug("Rejected")
-            pass
+            self.assignments = original_assignments
 
-    def propose_merge(self, x, y):
-        # Merge two clusters if the consensus sequences are same   # TODO: allow some diff when noise exists?
-        if self.cluster_cons(self.assignments[x]) == self.cluster_cons(self.assignments[y]):
-            logger.debug("Merge Accepted")
-            for i in range(self.N):
-                if self.assignments[i] == self.assignments[y]:
-                    self.assignments[i] = self.assignments[x]
-        else:
-            # logger.debug("Rejected")
-            pass
-
-        """
-        # Merge cluster <old_cluster_id_x> and <old_cluster_id_y> into <old_cluster_id_x>
-        old_cluster_id_x = self.assignments[x]
-        old_cluster_id_y = self.assignments[y]
-        new_assignments = np.copy(self.assignments)
-        
-        # Change cluster assignment of the units in the cluster which units[y] belongs to
-        for i in range(self.N):
-            if new_assignments[i] == old_cluster_id_y:
-                new_assignments[i] = old_cluster_id_x
-        logger.debug(f"\nCurrent state:\n{self.assignments}\nProposed state:\n{new_assignments}")
-        
-        # Compare the probability of the current state and the proposed state
-        p_current = self.log_prob_clustering()
-        p_new = self.log_prob_clustering(new_assignments)
-        logger.debug(f"Current state prob: {p_current}, Proposed state prob: {p_new}")
-        if p_current < p_new:
-            logger.debug("Accepted")
-            self.assignments = new_assignments
-        else:
-            logger.debug("Rejected")
-        """
+    def _merge(self,
+               data_i: int,
+               data_j: int):
+        # TODO: merge proposal の確率が低すぎる問題を調べる
+        cluster_id_i = self.assignments[data_i]
+        cluster_id_j = self.assignments[data_j]
+        cons_seq_i = self.cluster_cons_seq(cluster_id_i)
+        cons_seq_j = self.cluster_cons_seq(cluster_id_j)
+        if cons_seq_i == cons_seq_j:
+            logger.debug(f"merged {cluster_id_j} -> {cluster_id_i}")
+            self.merge_cluster(cluster_id_i, cluster_id_j)

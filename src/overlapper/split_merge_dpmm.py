@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import List, Tuple
+import random
 from BITS.util.io import save_pickle, load_pickle
 from BITS.util.proc import NoDaemonPool, run_command
 from BITS.util.scheduler import Scheduler, run_distribute
@@ -22,6 +23,7 @@ class SplitMergeDpmmOverlapper:
       @ n_core       : Number of cores per job.
       @ out_fname    : Output file name.
       @ tmp_dname    : Name of directory for intermediate files.
+      @ rand_seed : Seed for random values.
     """
     sync_reads_fname: str
     ward_th: float = 0.01
@@ -31,8 +33,10 @@ class SplitMergeDpmmOverlapper:
     n_core: int = 1
     out_fname: str = "labeled_reads.pkl"
     tmp_dname: str = "smdc_ovlp"
+    rand_seed: int = 0
 
     def __post_init__(self):
+        random.seed(self.rand_seed)
         run_command(f"mkdir -p {self.tmp_dname}; rm -f {self.tmp_dname}/*")
 
     def run(self):
