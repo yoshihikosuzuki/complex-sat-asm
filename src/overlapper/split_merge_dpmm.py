@@ -21,15 +21,17 @@ class SplitMergeDpmmOverlapper:
     optional arguments:
       @ th_ward      : Distance threshold for initial clustering.
       @ alpha        : Concentration hyperparameter for DPMM.
+      @ p_error      : Average sequencing error rate.
       @ scheduler    : Scheduler object.
       @ n_distribute : Number of jobs.
       @ n_core       : Number of cores per job.
       @ out_fname    : Output file name.
       @ tmp_dname    : Name of directory for intermediate files.
-      @ rand_seed : Seed for random values.
+      @ rand_seed    : Seed for random values.
+      @ verbose      : Output debug messages.
     """
     sync_reads_fname: str
-    ward_th: float = 0.01
+    th_ward: float = 0.01
     alpha: float = 1.
     p_error: float = 0.01
     scheduler: Scheduler = Scheduler()
@@ -38,6 +40,7 @@ class SplitMergeDpmmOverlapper:
     out_fname: str = "labeled_reads.pkl"
     tmp_dname: str = "smdc_ovlp"
     rand_seed: int = 0
+    verbose: bool = False
 
     def __post_init__(self):
         random.seed(self.rand_seed)
@@ -54,7 +57,8 @@ class SplitMergeDpmmOverlapper:
             n_distribute=self.n_distribute,
             n_core=self.n_core,
             tmp_dname=self.tmp_dname,
-            out_fname=self.out_fname)
+            out_fname=self.out_fname,
+            log_level="debug" if self.verbose else "info")
         save_pickle(labeled_reads, self.out_fname)
         # TODO: ava overlap among labeled_reads
 
@@ -84,14 +88,20 @@ def run_smdc(read_id: int,
     quals = [qual for read in reads for qual in read.unit_quals]
     smdc = ClusteringSeqSMD(units, quals, alpha, p_error)
 
+    assert len(smdc.data) == len(smdc.quals)
+    for i in range(smdc.N):
+        assert len(smdc.data[i]) == len(smdc.quals[i])
+
     # Initial clustering
     smdc.calc_dist_mat(n_core=n_core)
     if plot:
         smdc.show_dendrogram()
     smdc.cluster_hierarchical(threshold=th_ward)
+    logger.debug(f"Hierarchical clustering assignments:\n{smdc.assignments}")
     # TODO: remove single "outlier" units?
     # (probably from regions covered only once by these reads right here)
-    smdc.gibbs_full()
+    smdc.gibbs_full(no_p_old=True)
+    logger.debug(f"Assignments after full-scan Gibbs:\n{smdc.assignments}")
 
     # Perform split-merge samplings until convergence
     prev_p = smdc.logp_clustering()
@@ -129,5 +139,6 @@ def run_smdc(read_id: int,
         read.repr_units = repr_units
         for unit in read.units:
             unit.repr_id = smdc.assignments[index]
+            # TODO: update repr_aln
             index += 1
     return read_id, reads

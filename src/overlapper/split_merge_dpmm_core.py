@@ -42,6 +42,9 @@ class ClusteringSeqSMD(ClusteringSeq):
         self.alpha = alpha
         self.p_error = p_error
         self.names = names
+        self.s_dist_mat = None
+        self.c_dist_mat = None
+        self.cache = {}
         super().__post_init__(revcomp=False, cyclic=False)
         # Caches
         self._cache_logp_cluster = {}   # {tuple(data_ids): logp_cluster}
@@ -118,8 +121,8 @@ class ClusteringSeqSMD(ClusteringSeq):
                                              except_id,
                                              return_where=True))
         if data_ids in self._cache_cons_seq:
-            logger.debug("cluster_cons_seq: cache hit "
-                         f"(cluster {cluster_id} except {except_id})")
+            # logger.debug("cluster_cons_seq: cache hit "
+            #             f"(cluster {cluster_id} except {except_id})")
             return self._cache_cons_seq[data_ids]
         seqs = list(self.cluster_except(cluster_id, except_id))
         if len(seqs) == 0:   # The cluster has disappeared
@@ -137,25 +140,29 @@ class ClusteringSeqSMD(ClusteringSeq):
         p = (self._logp_ewens()
              + np.sum([self._logp_cluster(cluster_id)
                        for cluster_id in self.cluster_ids]))
-        assert p != -np.inf, "-inf probability"
+        if p == -np.inf:
+            logger.warning("!!!!! -inf clustering logp !!!!!")
         return p
 
     def _logp_ewens(self) -> float:
-        return (self._const_ewens
-                + self.n_clusters * np.log10(self.alpha)
-                + np.sum([self._log_factorial[self.cluster_size(cluster_id) - 1]
-                          for cluster_id in self.cluster_ids]))
+        p = (self._const_ewens
+             + self.n_clusters * np.log10(self.alpha)
+             + np.sum([self._log_factorial[self.cluster_size(cluster_id) - 1]
+                       for cluster_id in self.cluster_ids]))
+        logger.debug(f"logp ewens = {p}")
+        return p
 
     def _logp_cluster(self,
                       cluster_id: int) -> float:
         data_ids = tuple(self.cluster(cluster_id, return_where=True))
         if data_ids in self._cache_logp_cluster:
-            logger.debug("_logp_cluster: cache hit "
-                         f"(cluster {cluster_id})")
+            # logger.debug("_logp_cluster: cache hit "
+            #             f"(cluster {cluster_id})")
             return self._cache_logp_cluster[data_ids]
         p = (self._logp_cluster_composition(cluster_id)
              + self._logp_seqs_generate(cluster_id))
         self._cache_logp_cluster[data_ids] = p
+        logger.debug(f"logp cluster {cluster_id} = {p}")
         return p
 
     def _logp_cluster_composition(self,
@@ -231,9 +238,10 @@ class ClusteringSeqSMD(ClusteringSeq):
             p = 0.
             pos = 0
             for c in fcigar:
-                p += (phred_to_log10_p_correct(obs_qual[pos]) if c == '='
-                      else phred_to_log10_p_error(obs_qual[pos]))
-                if c in ('=', 'X', 'D'):
+                p += (phred_to_log10_p_correct if c == '='
+                      else phred_to_log10_p_error)(obs_qual[min(len(obs_seq) - 1,
+                                                                pos)])
+                if c != 'I':
                     pos += 1
             assert pos == len(obs_seq), "Invalid CIGAR"
             return p
@@ -241,12 +249,16 @@ class ClusteringSeqSMD(ClusteringSeq):
         ######################################################################
 
     def gibbs_full(self,
-                   n_iter: int = 1):
-        """Perform full scans of Gibbs sampling."""
-        p_old = self.logp_clustering()
+                   n_iter: int = 1,
+                   no_p_old: bool = False):
+        """Perform full scans of Gibbs sampling.
+        Use `no_p_old=True` if the current clustering state is not good."""
+        p_old = None if no_p_old else self.logp_clustering()
         self._gibbs(list(range(self.N)), self.cluster_ids, n_iter)
         p_new = self.logp_clustering()
-        logger.info(f"Full Gibbs x{n_iter}: {p_old:.0f} -> {p_new:.0f}")
+        logger.info(f"Full Gibbs x{n_iter}: "
+                    f"{p_old:{'' if no_p_old else '.0f'}} "
+                    f"-> {p_new:.0f}")
 
     def _gibbs_restricted(self,
                           cluster_i: int,
@@ -263,9 +275,17 @@ class ClusteringSeqSMD(ClusteringSeq):
                n_iter: int):
         """Perform Gibbs sampling within specified data and clusters."""
         for t in range(n_iter):
-            for data_id in data_ids:
+            logger.debug(f"Gibbs {t}/{n_iter}")
+            for i, data_id in enumerate(data_ids):
+                if i % 10 == 0:
+                    logger.debug(f"Data {i}/{len(data_ids)}")
+                old_assignment = self.assignments[data_id]
                 self.assignments[data_id] = self._gibbs_single(data_id,
                                                                cluster_ids)
+                new_assignment = self.assignments[data_id]
+                if old_assignment != new_assignment:
+                    logger.debug(f"data {data_id}: cluster "
+                                 f"{old_assignment} -> {new_assignment}")
 
     def _gibbs_single(self,
                       data_id: int,
@@ -338,7 +358,8 @@ class ClusteringSeqSMD(ClusteringSeq):
         # Cluster IDs after split; one is same as the original cluster
         old_cluster_id = self.assignments[data_i]
         new_cluster_id = np.max(self.assignments) + 1
-        logger.debug(f"split {old_cluster_id} -> {old_cluster_id}, {new_cluster_id}")
+        logger.debug(
+            f"split {old_cluster_id} -> {old_cluster_id}, {new_cluster_id}")
         # Initial assignments of the data in the cluster into one of the two clusters
         if init_how == "random":
             random_assignments()
