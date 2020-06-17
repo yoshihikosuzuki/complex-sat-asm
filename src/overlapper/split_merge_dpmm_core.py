@@ -241,7 +241,7 @@ class ClusteringSeqSMD(ClusteringSeq):
         ######################################################################
 
     def gibbs_full(self,
-                   n_iter: int):
+                   n_iter: int = 1):
         """Perform full scans of Gibbs sampling."""
         p_old = self.logp_clustering()
         self._gibbs(list(range(self.N)), self.cluster_ids, n_iter)
