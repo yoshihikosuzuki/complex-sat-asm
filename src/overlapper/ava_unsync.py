@@ -78,7 +78,7 @@ class UnsyncReadsOverlapper:
             n_distribute=self.n_distribute,
             n_core=self.n_core,
             tmp_dname=self.tmp_dname,
-            job_name="ava_uncync",
+            job_name="ava_unsync",
             out_fname=self.out_fname,
             log_level="debug" if self.verbose else "info")
         save_pickle(sorted(reduce_same_overlaps(overlaps)),

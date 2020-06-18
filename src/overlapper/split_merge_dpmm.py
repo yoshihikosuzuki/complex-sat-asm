@@ -3,6 +3,7 @@ from typing import List, Tuple
 from collections import Counter
 import random
 from logzero import logger
+from BITS.seq.align import EdlibRunner
 from BITS.util.io import save_pickle, load_pickle
 from BITS.util.proc import NoDaemonPool, run_command
 from BITS.util.scheduler import Scheduler, run_distribute
@@ -103,8 +104,7 @@ def run_smdc(read_id: int,
     logger.debug(f"Assignments after full-scan Gibbs:\n{smdc.assignments}")
 
     # Perform split-merge samplings until convergence
-    # NOTE: convert log probabilty to string for -np.inf
-    prev_p = f"{smdc.logp_clustering():.0f}"
+    prev_p = f"{smdc.logp_clustering():.0f}"   # use str for -np.inf
     p_counts = Counter()   # for oscillation
     count, inf_count = 0, 0
     while count < 2:
@@ -132,6 +132,7 @@ def run_smdc(read_id: int,
     logger.debug(f"Finished read {read_id}")
 
     # Update representative units and assignments
+    er = EdlibRunner("global", revcomp=False)
     repr_units = {cluster_cons.cluster_id: cluster_cons.seq
                   for cluster_cons in smdc._generate_consensus()}
     index = 0
@@ -139,6 +140,7 @@ def run_smdc(read_id: int,
         read.repr_units = repr_units
         for unit in read.units:
             unit.repr_id = smdc.assignments[index]
-            # TODO: update repr_aln
+            unit.repr_aln = er.align(read.seq[unit.start:unit.end],
+                                     repr_units[unit.repr_id])
             index += 1
     return read_id, reads
