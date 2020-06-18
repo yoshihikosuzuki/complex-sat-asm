@@ -13,27 +13,32 @@ from BITS.seq.util import reverse_seq, revcomp_seq
 from BITS.util.proc import NoDaemonPool
 from ..type import TRRead, Overlap
 from ..overlapper.align_proper import can_be_query
+from .graph import (remove_revcomp_graph, reduce_transitive_edges,
+                    remove_spur_edges, reduce_simple_paths)
 
 er_global = EdlibRunner("global", revcomp=False)
 er_prefix = EdlibRunner("prefix", revcomp=False)
 
 
-def graph_to_contig(g: ig.Graph,
-                    overlaps: List[Overlap],
-                    reads_by_id: Dict[int, TRRead],
-                    max_diff: float,
-                    contig_name_prefix: str = "contig",
-                    window_size: int = 1000,
-                    include_first_read: bool = True,
-                    n_core: int = 1) -> List[FastaRecord]:
-    """Generate a contig sequence from each path in the graph."""
-    edges_list = [(f"{contig_name_prefix}_{i}", e["edges"])
-                  for i, e in enumerate(g.es)]
-    n_part = -(-len(edges_list) // n_core)
+def graphs_to_contigs(sg: ig.Graph,
+                      overlaps: List[Overlap],
+                      reads_by_id: Dict[int, TRRead],
+                      max_diff: float = 0.02,
+                      window_size: int = 1000,
+                      include_first_read: bool = True,
+                      n_core: int = 1):
+    args = [(f"cc{i}_{j} {e['edges'][0]['source']} -> {e['edges'][-1]['target']}",
+             e["edges"])
+            for i, cc in enumerate(remove_revcomp_graph(sg))
+            for j, e in enumerate(
+                reduce_simple_paths(
+                    reduce_transitive_edges(
+                        remove_spur_edges(cc))).es)]
+    n_part = -(-len(args) // n_core)
     contigs = []
     with NoDaemonPool(n_core) as pool:
         for ret in pool.starmap(_graph_to_contig_multi,
-                                [(edges_list[i * n_part:(i + 1) * n_part],
+                                [(args[i * n_part:(i + 1) * n_part],
                                   overlaps,
                                   reads_by_id,
                                   max_diff,
@@ -44,10 +49,10 @@ def graph_to_contig(g: ig.Graph,
     return contigs
 
 
-def _graph_to_contig_multi(edges_list: List[Tuple[str, List[Dict]]],
-                           *args) -> List[FastaRecord]:
-    return [_graph_to_contig(contig_name, edges, *args)
-            for contig_name, edges in edges_list]
+def _graph_to_contig_multi(args_list: List[Tuple[str, List[Dict]]],
+                           *params) -> List[FastaRecord]:
+    return [_graph_to_contig(contig_name, edges, *params)
+            for contig_name, edges in args_list]
 
 
 def _graph_to_contig(contig_name: str,
@@ -57,8 +62,7 @@ def _graph_to_contig(contig_name: str,
                      max_diff: float,
                      window_size: int = 1000,
                      include_first_read: bool = True) -> FastaRecord:
-    source, target = edges[0]['source'], edges[-1]['target']
-    logger.info(f"Edge {source} -> {target}")
+    logger.info(f"Contig {contig_name}")
     init_contig = edges_to_init_contig(edges,
                                        reads_by_id,
                                        include_first_read)
@@ -74,8 +78,7 @@ def _graph_to_contig(contig_name: str,
                 f"({diff:.2f} %diff)")
     if diff > 1.:
         logger.warning("Low consensus quality")
-    return FastaRecord(name=f"{contig_name} {source} -> {target}",
-                       seq=cons_contig)
+    return FastaRecord(name=contig_name, seq=cons_contig)
 
 
 def vname_to_read(vname: str) -> Tuple[int, int]:
@@ -120,7 +123,7 @@ def consensus_contig(init_contig: str,
     return calc_cons(mappings, init_contig, reads_by_id, max_diff, window_size)
 
 
-@dataclass(frozen=True)
+@ dataclass(frozen=True)
 class ReadLayout:
     """`strand(read)` starts at `rel_pos` on a specific coordinate system."""
     read_id: int
@@ -128,7 +131,7 @@ class ReadLayout:
     rel_pos: int
 
 
-@dataclass
+@ dataclass
 class Mapping:
     """
     NOTE: `strand(reads_by_id[read_id][read_start:read_end])
@@ -366,8 +369,12 @@ def calc_cons(mappings: List[Mapping],
                        for mapping in mappings
                        if (mapping.contig_start <= window_start
                            and window_end <= mapping.contig_end)]
-        logger.debug(f"Window {window_start}-{window_end}")
+        logger.debug(f"Window {window_start}-{window_end} "
+                     f"({len(mapped_seqs)} mapped reads)")
         n_init_depth = len(mapped_seqs)
+        if n_init_depth == 0:
+            logger.warning("No mapped reads. Return init sequence.")
+            return init_contig[window_start:window_end]
         # Remove sequences with anormal lengths (3 sigma criterion)
         mapped_lens = [len(s) for s in mapped_seqs]
         mean_len = mean(mapped_lens)

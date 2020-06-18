@@ -134,17 +134,14 @@ def svs_sync_reads(a_read: TRRead,
                                        b_read.units[b_start_unit].start)
             a_start, a_end, b_start, b_end, seq_diff = overlap
             if seq_diff < max_seq_diff:
-                if a_read.strand == 1:
-                    a_start, a_end = a_read.length - a_end, a_read.length - a_start
-                    b_start, b_end = b_read.length - b_end, b_read.length - b_start
                 overlaps.add(Overlap(a_read.id,
                                      b_read.id,
                                      0 if a_read.strand == b_read.strand else 1,
-                                     a_start,
-                                     a_end,
+                                     a_start if a_read.strand == 0 else a_read.length - a_end,
+                                     a_end if a_read.strand == 0 else a_read.length - a_start,
                                      a_read.length,
-                                     b_start,
-                                     b_end,
+                                     b_start if b_read.strand == 0 else b_read.length - b_end,
+                                     b_end if b_read.strand == 0 else b_read.length - b_start,
                                      b_read.length,
                                      diff))
 
@@ -166,17 +163,14 @@ def svs_sync_reads(a_read: TRRead,
                                        b_read.units[b_start_unit].start)
             a_start, a_end, b_start, b_end, seq_diff = overlap
             if seq_diff < max_seq_diff:
-                if a_read.strand == 1:
-                    a_start, a_end = a_read.length - a_end, a_read.length - a_start
-                    b_start, b_end = b_read.length - b_end, b_read.length - b_start
                 overlaps.add(Overlap(a_read.id,
                                      b_read.id,
                                      0 if a_read.strand == b_read.strand else 1,
-                                     a_start,
-                                     a_end,
+                                     a_start if a_read.strand == 0 else a_read.length - a_end,
+                                     a_end if a_read.strand == 0 else a_read.length - a_start,
                                      a_read.length,
-                                     b_start,
-                                     b_end,
+                                     b_start if b_read.strand == 0 else b_read.length - b_end,
+                                     b_end if b_read.strand == 0 else b_read.length - b_start,
                                      b_read.length,
                                      diff))
 
