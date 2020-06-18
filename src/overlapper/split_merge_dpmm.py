@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from typing import List, Tuple
 from collections import Counter
 import random
-import numpy as np
 from logzero import logger
 from BITS.util.io import save_pickle, load_pickle
 from BITS.util.proc import NoDaemonPool, run_command
@@ -104,14 +103,15 @@ def run_smdc(read_id: int,
     logger.debug(f"Assignments after full-scan Gibbs:\n{smdc.assignments}")
 
     # Perform split-merge samplings until convergence
-    prev_p = smdc.logp_clustering()
+    # NOTE: convert log probabilty to string for -np.inf
+    prev_p = f"{smdc.logp_clustering():.0f}"
     p_counts = Counter()   # for oscillation
     count, inf_count = 0, 0
     while count < 2:
         smdc.split_merge(max(smdc.n_clusters * 10, 100))
         smdc.gibbs_full()
-        p = smdc.logp_clustering()
-        if p == -np.inf or prev_p == -np.inf:
+        p = f"{smdc.logp_clustering():.0f}"
+        if p == "-inf" or prev_p == "-inf":
             logger.debug(f"Read {read_id}: -inf prob. Retry.")
             inf_count += 1
             if inf_count >= 5:
@@ -119,16 +119,16 @@ def run_smdc(read_id: int,
                 break
             continue
         logger.debug(f"Read {read_id}: {smdc.n_clusters} clusters, "
-                     f"prob {prev_p:.0f} -> {p:.0f} ({count})")
-        if p_counts[int(p)] >= 5:   # oscillation
+                     f"prob {prev_p} -> {p} ({count} times)")
+        if p_counts[p] >= 5:   # oscillation
             logger.debug(f"Oscillation at read {read_id}. Stop.")
             break
-        if int(p) == int(prev_p):
+        if p == prev_p:
             count += 1
         else:
             count = 0
         prev_p = p
-        p_counts[int(p)] += 1
+        p_counts[p] += 1
     logger.debug(f"Finished read {read_id}")
 
     # Update representative units and assignments

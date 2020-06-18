@@ -49,6 +49,7 @@ class ClusteringSeqSMD(ClusteringSeq):
         # Caches
         self._cache_logp_cluster = {}   # {tuple(data_ids): logp_cluster}
         self._cache_cons_seq = {}   # {tuple(data_ids): cons_seq}
+        self._cache_gen_seq = {}   # {tuple(cons_seq, obs_seq): logp_gen}
         # Precompute constants
         self._log_factorial = np.zeros(self.N + 1, dtype=np.float32)
         self._log_factorial[0] = -np.inf
@@ -115,8 +116,6 @@ class ClusteringSeqSMD(ClusteringSeq):
     def cluster_cons_seq(self,
                          cluster_id: int,
                          except_id: Optional[int] = None) -> str:
-        # TODO: except の時は cache に残さない？
-        #       その場合、except_id が cluster_id に含まれているかどうかで場合わけ
         data_ids = tuple(self.cluster_except(cluster_id,
                                              except_id,
                                              return_where=True))
@@ -149,7 +148,7 @@ class ClusteringSeqSMD(ClusteringSeq):
              + self.n_clusters * np.log10(self.alpha)
              + np.sum([self._log_factorial[self.cluster_size(cluster_id) - 1]
                        for cluster_id in self.cluster_ids]))
-        logger.debug(f"logp ewens = {p}")
+        logger.debug(f"logp ewens = {p:.0f}")
         return p
 
     def _logp_cluster(self,
@@ -162,27 +161,21 @@ class ClusteringSeqSMD(ClusteringSeq):
         p = (self._logp_cluster_composition(cluster_id)
              + self._logp_seqs_generate(cluster_id))
         self._cache_logp_cluster[data_ids] = p
-        logger.debug(f"logp cluster {cluster_id} = {p}")
+        logger.debug(f"logp cluster {cluster_id} = {p:.0f}")
         return p
 
     def _logp_cluster_composition(self,
                                   cluster_id: int) -> float:
         cons_seq = self.cluster_cons_seq(cluster_id)
         obs_seqs = self.cluster(cluster_id)
-
-        ######################### TODO: refactor #############################
-
         if cons_seq == "":
             return -np.inf
-
         dis_counts = count_discrepants(cons_seq, obs_seqs)
         dis_pos = [dis.seed_pos for dis in dis_counts.keys()]
-
         # compute for matches
         n_matches = len(cons_seq) - len(set(dis_pos))
         p_match = n_matches * len(obs_seqs) * np.log10(1 - self.p_error)
-
-        # compute for variants
+        # compute for non-matches
         # {(pos, index): Counter('A': n_A, ..., '-': n_-)} for each variant column
         dis_freqs = defaultdict(Counter)
         # list up frequencies of each variant for each position
@@ -199,10 +192,7 @@ class ClusteringSeqSMD(ClusteringSeq):
             n_match = len(obs_seqs) - np.sum(list(counts.values()))
             p_dis -= self._log_factorial[n_match]
             p_dis += n_match * np.log10(1 - self.p_error)
-
         return p_match + p_dis
-
-        ######################################################################
 
     def _logp_seqs_generate(self,
                             cluster_id: int) -> float:
@@ -216,24 +206,19 @@ class ClusteringSeqSMD(ClusteringSeq):
     def _logp_seq_generate(self,
                            cons_seq: str,
                            data_id: int) -> float:
-        obs_seq = self.data[data_id]
-        obs_qual = self.quals[data_id]
-
-        ######################### TODO: refactor #############################
-
+        if (cons_seq, data_id) in self._cache_gen_seq:
+            return self._cache_gen_seq[(cons_seq, data_id)]
         if cons_seq == "":
             return -np.inf
-
-        # Compute alignment
+        obs_seq, obs_qual = self.data[data_id], self.quals[data_id]
         fcigar = self.er.align(cons_seq, obs_seq).cigar.flatten()
-
         # Calculate the sum of log probabilities for each position in the alignment
         if obs_qual is None:
             p_non_match = 0.01   # TODO: magic number for CCS!
             n_match = Counter(fcigar)['=']
             n_non_match = len(fcigar) - n_match
-            return (n_match * np.log10(1 - p_non_match)
-                    + n_non_match * np.log10(p_non_match))
+            p = (n_match * np.log10(1 - p_non_match)
+                 + n_non_match * np.log10(p_non_match))
         else:
             p = 0.
             pos = 0
@@ -244,12 +229,11 @@ class ClusteringSeqSMD(ClusteringSeq):
                 if c != 'I':
                     pos += 1
             assert pos == len(obs_seq), "Invalid CIGAR"
-            return p
-
-        ######################################################################
+        self._cache_gen_seq[(cons_seq, data_id)] = p
+        return p
 
     def gibbs_full(self,
-                   n_iter: int = 1,
+                   n_iter: int = 2,
                    no_p_old: bool = False):
         """Perform full scans of Gibbs sampling.
         Use `no_p_old=True` if the current clustering state is not good."""
