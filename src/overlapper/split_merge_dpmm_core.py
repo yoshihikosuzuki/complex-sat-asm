@@ -7,7 +7,12 @@ from logzero import logger
 import consed
 from BITS.clustering.seq import ClusteringSeq
 from BITS.seq.alt_consensus import consensus_alt, count_discrepants
-from BITS.seq.util import phred_to_log10_p_correct, phred_to_log10_p_error
+
+
+PHRED_TO_LOGP_ERROR = [-phred / 10 for phred in range(94)]
+PHRED_TO_LOGP_CORRECT = [-np.inf if phred == 0
+                         else np.log10(1 - np.power(10, -phred / 10))
+                         for phred in range(94)]
 
 
 @dataclass(repr=False, eq=False)
@@ -58,7 +63,7 @@ class ClusteringSeqSMD(ClusteringSeq):
         self._const_ewens = -np.sum([np.log10(self.alpha + i)
                                      for i in range(self.N)])
         # NOTE: unnecessary for "deterministic" Gibbs sampling
-        #self._const_gibbs = -np.log10(self.N - 1 + self.alpha)
+        # self._const_gibbs = -np.log10(self.N - 1 + self.alpha)
 
     def show(self):
         for cons in sorted(self._generate_consensus(),
@@ -223,9 +228,9 @@ class ClusteringSeqSMD(ClusteringSeq):
             p = 0.
             pos = 0
             for c in fcigar:
-                p += (phred_to_log10_p_correct if c == '='
-                      else phred_to_log10_p_error)(obs_qual[min(len(obs_seq) - 1,
-                                                                pos)])
+                p += (PHRED_TO_LOGP_CORRECT if c == '='
+                      else PHRED_TO_LOGP_ERROR)[obs_qual[min(len(obs_seq) - 1,
+                                                             pos)]]
                 if c != 'I':
                     pos += 1
             assert pos == len(obs_seq), "Invalid CIGAR"
