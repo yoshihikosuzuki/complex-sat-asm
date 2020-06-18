@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Set
 from multiprocessing import Pool
 from logzero import logger
 from BITS.seq.align import EdlibAlignment, EdlibRunner
@@ -57,7 +57,7 @@ def ava_sync(sync_reads: List[Tuple[int, List[TRRead]]],
              max_units_diff: float,
              max_seq_diff: float,
              n_core: int) -> List[Overlap]:
-    overlaps = []
+    overlaps = set()
     with Pool(n_core) as pool:
         for ret in pool.starmap(_ava_sync,
                                 [(read_id,
@@ -66,15 +66,15 @@ def ava_sync(sync_reads: List[Tuple[int, List[TRRead]]],
                                   max_units_diff,
                                   max_seq_diff)
                                  for read_id, reads in sync_reads]):
-            overlaps += ret
-    return overlaps
+            overlaps.update(ret)
+    return sorted(overlaps)
 
 
 def _ava_sync(read_id: int,
               reads: List[TRRead],
               min_n_units: int,
               max_units_diff: float,
-              max_seq_diff: float) -> List[Overlap]:
+              max_seq_diff: float) -> Set[Overlap]:
     # Precompute all-vs-all global alignments between the representative units
     logger.debug(f"Start {read_id} ({len(reads)} reads)")
     for i in range(len(reads) - 1):
@@ -88,12 +88,12 @@ def _ava_sync(read_id: int,
                 continue
             repr_alignments[(id_i, id_j)] = repr_alignments[(id_j, id_i)] \
                 = er_global.align(seq_i, seq_j)
-    overlaps = []
+    overlaps = set()
     for read_i in reads:
         for read_j in reads:
             if read_i.id >= read_j.id:
                 continue
-            overlaps.append(svs_sync_reads(read_i,
+            overlaps.update(svs_sync_reads(read_i,
                                            read_j,
                                            repr_alignments,
                                            min_n_units=min_n_units,
@@ -108,11 +108,11 @@ def svs_sync_reads(a_read: TRRead,
                    repr_alignments: Dict[Tuple[int, int], EdlibAlignment],
                    min_n_units: int,
                    max_units_diff: float,
-                   max_seq_diff: float) -> List[Overlap]:
+                   max_seq_diff: float) -> Set[Overlap]:
     """Overlap by sequence identity only on representative units.
     Sequence dovetail overlap including non-TR regions is done just for
     excluding overlaps with too different non-TR regions."""
-    overlaps = []
+    overlaps = set()
     if min(len(a_read.units), len(b_read.units)) < min_n_units:
         return overlaps
 
@@ -137,16 +137,16 @@ def svs_sync_reads(a_read: TRRead,
                 if a_read.strand == 1:
                     a_start, a_end = a_read.length - a_end, a_read.length - a_start
                     b_start, b_end = b_read.length - b_end, b_read.length - b_start
-                overlaps.append(Overlap(a_read.id,
-                                        b_read.id,
-                                        0 if a_read.strand == b_read.strand else 1,
-                                        a_start,
-                                        a_end,
-                                        a_read.length,
-                                        b_start,
-                                        b_end,
-                                        b_read.length,
-                                        diff))
+                overlaps.add(Overlap(a_read.id,
+                                     b_read.id,
+                                     0 if a_read.strand == b_read.strand else 1,
+                                     a_start,
+                                     a_end,
+                                     a_read.length,
+                                     b_start,
+                                     b_end,
+                                     b_read.length,
+                                     diff))
 
     # from  a  ----->  to     a ----->
     #       b ----->      b ----->
@@ -169,15 +169,15 @@ def svs_sync_reads(a_read: TRRead,
                 if a_read.strand == 1:
                     a_start, a_end = a_read.length - a_end, a_read.length - a_start
                     b_start, b_end = b_read.length - b_end, b_read.length - b_start
-                overlaps.append(Overlap(a_read.id,
-                                        b_read.id,
-                                        0 if a_read.strand == b_read.strand else 1,
-                                        a_start,
-                                        a_end,
-                                        a_read.length,
-                                        b_start,
-                                        b_end,
-                                        b_read.length,
-                                        diff))
+                overlaps.add(Overlap(a_read.id,
+                                     b_read.id,
+                                     0 if a_read.strand == b_read.strand else 1,
+                                     a_start,
+                                     a_end,
+                                     a_read.length,
+                                     b_start,
+                                     b_end,
+                                     b_read.length,
+                                     diff))
 
     return overlaps

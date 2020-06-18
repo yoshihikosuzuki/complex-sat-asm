@@ -57,6 +57,7 @@ class SplitMergeDpmmOverlapper:
             n_distribute=self.n_distribute,
             n_core=self.n_core,
             tmp_dname=self.tmp_dname,
+            job_name="smdc_ovlp",
             out_fname=self.out_fname,
             log_level="debug" if self.verbose else "info")
         save_pickle(labeled_reads, self.out_fname)
