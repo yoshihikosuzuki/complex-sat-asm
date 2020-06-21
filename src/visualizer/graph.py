@@ -67,6 +67,7 @@ def draw_string_graph(sg: ig.Graph,
          f"{v['name']}<br>{cov_rates[v.index]:.1f}% covered")
         for v in sg.vs])
     traces.append(make_scatter(x=x, y=y, text=t, col=cov_rates,
+                               col_range=(50, 100),
                                col_scale='YlGnBu',
                                show_scale=False,
                                marker_size=node_size,

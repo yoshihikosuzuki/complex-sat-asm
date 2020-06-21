@@ -27,6 +27,7 @@ def graphs_to_contigs(sg: ig.Graph,
                       window_size: int = 1000,
                       include_first_read: bool = True,
                       n_core: int = 1):
+    # TODO: Change the order so that total bases per core are even
     args = [(f"cc{i}_{j} {e['edges'][0]['source']} -> {e['edges'][-1]['target']}",
              e["edges"])
             for i, cc in enumerate(remove_revcomp_graph(sg))
@@ -212,8 +213,8 @@ def layout_reads(edges: List[Dict],
         layouts_by_id[layout.read_id].append(layout)
     for read_id, ls in sorted(layouts_by_id.items(),
                               key=lambda x: mean([l.rel_pos for l in x[1]])):
-        logger.debug(
-            f"Read {read_id}: {' '.join(map(str, [l.rel_pos for l in ls]))}")
+        mapped_pos = [l.rel_pos for l in ls]
+        logger.debug(f"Read {read_id}: {' '.join(map(str, mapped_pos))}")
     return layouts
 
 
@@ -235,7 +236,7 @@ def layouts_to_mappings(layouts: List[ReadLayout],
         logger.debug(f"Read {read_id}: {best_mapping}")
         if best_mapping.diff < max_diff:
             mappings.append(best_mapping)
-    logger.debug(f"{len(mappings)} mappings")
+    # logger.debug(f"{len(mappings)} mappings")
     return mappings
 
 
@@ -369,12 +370,12 @@ def calc_cons(mappings: List[Mapping],
                        for mapping in mappings
                        if (mapping.contig_start <= window_start
                            and window_end <= mapping.contig_end)]
-        logger.debug(f"Window {window_start}-{window_end} "
-                     f"({len(mapped_seqs)} mapped reads)")
+        logger.debug(f"Window {window_start}-{window_end}")
         n_init_depth = len(mapped_seqs)
         if n_init_depth == 0:
             logger.warning("No mapped reads. Return init sequence.")
             return init_contig[window_start:window_end]
+
         # Remove sequences with anormal lengths (3 sigma criterion)
         mapped_lens = [len(s) for s in mapped_seqs]
         mean_len = mean(mapped_lens)
@@ -383,27 +384,23 @@ def calc_cons(mappings: List[Mapping],
         max_len = int(mean_len + 3 * stdev_len)
         mapped_seqs = list(filter(lambda s: min_len <= len(s) <= max_len,
                                   mapped_seqs))
-        logger.debug(f"Seqs within {min_len}-{max_len} bp are used "
+        logger.debug(f"Use {min_len}-{max_len} bp seqs "
                      f"({n_init_depth} -> {len(mapped_seqs)} reads)")
-        assert len(mapped_seqs) > 0, "No reads for consensus."
+
         # Compute consensus sequence from the good mappings
         cons_seq = consed.consensus(mapped_seqs,
                                     seed_choice="median",
                                     n_iter=2)
-        diff = (er_global.align(init_contig[window_start:window_end],
-                                cons_seq).diff * 100
-                if len(cons_seq) > 0 else 0.)
-        logger.debug(f"Consensus by Consed: {len(cons_seq)} bp, "
-                     f"{diff:.2f} %diff")
+        cons_by = "Consed"
         if len(cons_seq) == 0:
             logger.warning("Consed failed. Retry with alt_consensus")
             cons_seq = consensus_alt(mapped_seqs,
                                      seed_choice="median")
-            assert len(cons_seq) > 0, "alt_consensus failed"
-            diff = er_global.align(init_contig[window_start:window_end],
-                                   cons_seq).diff * 100
-            logger.debug(f"Consensus by alt_consensus: {len(cons_seq)} bp, "
-                         f"{diff:.2f} %diff")
+            cons_by = "alt_consensus"
+        diff = er_global.align(init_contig[window_start:window_end],
+                               cons_seq).diff * 100
+        logger.debug(f"Consensus by {cons_by}: {len(cons_seq)} bp, "
+                     f"{diff:.2f} %diff")
         return cons_seq
 
     return ''.join([_calc_cons(i * window_size,
