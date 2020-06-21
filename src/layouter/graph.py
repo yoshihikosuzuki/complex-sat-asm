@@ -1,4 +1,5 @@
-from typing import Union, Optional, List
+from typing import Union, Optional, List, Tuple
+from copy import deepcopy
 from logzero import logger
 import igraph as ig
 from ..overlapper.filter_overlap import remove_contained_reads
@@ -27,6 +28,25 @@ def remove_revcomp_graph(g: ig.Graph) -> List[ig.Graph]:
             cc.append(gg)
     logger.info(f"{n_cc_prev} -> {len(cc)} connected components")
     return cc
+
+
+def remove_revcomp_paths(g: ig.Graph) -> ig.Graph:
+    """Remove revcomp paths in a single string graph."""
+    assert len(g.cluster(mode="weak").subgraphs()) == 1, \
+        "`g` must contain only a single connected component."
+    forward_vnames = {v["name"] for v in g.vs}
+    revcomp_vnames = {f"{read_id}:{'B' if node_type == 'E' else 'E'}"
+                      for vname in forward_vnames
+                      for read_id, node_type in vname.split(':')}
+    if forward_vnames & revcomp_vnames == 0:
+        return g
+    logger.debug("Forward + revcomp graph")
+    vnames = forward_vnames - revcomp_vnames
+    removed_g = ig.DictList(edges=[e.attributes() for e in g.es
+                                   if e["source"] in vnames and e["target"] in vnames],
+                            vertices=None, directed=True)
+    logger.info(f"{g.vcount()} -> {removed_g.vcount()} nodes")
+    return removed_g
 
 
 def reduce_transitive_edges(sg: ig.Graph,
@@ -144,9 +164,7 @@ def reduce_simple_paths(g: ig.Graph) -> ig.Graph:
 
 def remove_spur_edges(g: ig.Graph) -> ig.Graph:
     """Remove single-node dead-end branches from the graph."""
-    # TODO: remove longer branches
-    def is_spur(e: ig.Edge,
-                g: ig.Graph) -> bool:
+    def is_spur(e: ig.Edge) -> bool:
         s_in_edges = v_to_in_edges(e.source, g)
         s_out_edges = v_to_out_edges(e.source, g)
         t_in_edges = v_to_in_edges(e.target, g)
@@ -158,8 +176,123 @@ def remove_spur_edges(g: ig.Graph) -> ig.Graph:
         return False
 
     removed_g = ig.Graph.DictList(edges=[e.attributes() for e in g.es
-                                         if not is_spur(e, g)],
+                                         if not is_spur(e)],
                                   vertices=None,
                                   directed=True)
     logger.info(f"{g.ecount()} -> {removed_g.ecount()} edges")
     return removed_g
+
+
+def remove_isolated_edges(g: ig.Graph) -> ig.Graph:
+    """Find every path consisting only of an isolated single edge."""
+    isolated_edges = []
+    for e in g.es:
+        s, t = e["source"], e["target"]
+        _g = deepcopy(g)   # TODO: do the same thing without copy
+        _g.delete_edges(e.index)
+        min_weight = _g.shortest_paths(source=s, target=t, mode="ALL")[0][0]
+        if min_weight != 2:
+            if min_weight == float("inf"):
+                # single-edge cut of two connected components
+                # TODO: remove this if there are two main paths
+                logger.debug(f"Cut by single edge: {s} -> {t}")
+            else:
+                isolated_edges.append((s, t))
+    logger.debug(isolated_edges)
+    removed_g = ig.Graph.DictList(edges=[e.attributes() for e in g.es
+                                         if (e["source"], e["target"]) not in isolated_edges],
+                                  vertices=None,
+                                  directed=True)
+    logger.info(f"{g.ecount()} -> {removed_g.ecount()} edges")
+    return removed_g
+
+
+def find_longest_path(g: ig.Graph) -> ig.Graph:
+    """For each maximal directed acyclic subgraph in the string graph, find and
+    keep only the longest path (in terms of base pairs)."""
+    def calc_longest_path(direction: str = "OUT") -> Tuple[List[str],
+                                                           List[Tuple[str, str]]]:
+        """
+        NOTE: When the graph contains a cyclic, igraph's topological sorting
+              returns a partial ordering of nodes in the maximal directed
+              acyclic subgraph.
+
+        return values:
+          @ dag_vs : List of names of the topologically ordered nodes in the
+                     maximal directed acyclic subgraph.
+          @ path   : List of edges of the longest path in the maximal DAG.
+        """
+        # TODO: fix unexpected behavior of topological sort for multiple main paths
+        assert direction in ("IN", "OUT"), \
+            "`direction` must be one of {'IN', 'OUT'}"
+        v_index_to_name = {v.index: v["name"] for v in g.vs}
+        dag_vs = [v_index_to_name[v]
+                  for v in (g.topological_sorting() if direction == "OUT"
+                            else reversed(g.topological_sorting(mode="IN")))]
+        logger.debug(f"Sorted nodes ({direction}): {dag_vs}")
+        # Compute the longest path with DP
+        s, t = dag_vs[0], dag_vs[-1]
+        dists = {v: float("-inf") for v in dag_vs}
+        prev_edge = {v: None for v in dag_vs}
+        dists[s] = 0
+        for v in dag_vs[:-1]:
+            for edge in v_to_out_edges(v, g):
+                w = edge["target"]
+                if dists[w] < dists[v] + edge["length"]:
+                    dists[w] = dists[v] + edge["length"]
+                    prev_edge[w] = v
+        # Backtrace
+        path = []
+        v = t
+        while v is not None:
+            w = prev_edge[v]
+            path.append((w, v))
+            v = w
+        path = reversed(path)
+        logger.debug(f"Longest path ({direction}): {path}")
+        # NOTE: Always return path in OUT direction as these edges are true.
+        return dag_vs, path
+
+    # Perform the reduction independently for individual CC.
+    ccs = g.clusters(mode="weak").subgraphs()
+    if len(ccs) > 1:
+        logger.debug(f"{len(ccs)} connected components")
+        return ig.Graph.DictList(edges=[e.attributes()
+                                        for cc in ccs
+                                        for e in find_longest_path(cc).es],
+                                 vertices=None,
+                                 directed=True)
+    # Compute maximal directed acyclic subgraphs from both directions
+    out_dag_vs, out_longest_path = calc_longest_path(direction="OUT")
+    dag_vs = set(out_dag_vs)
+    longest_path_es = set(out_longest_path)
+    longest_path_vs = set([vname
+                           for es in out_longest_path
+                           for vname in es])
+    if len(out_dag_vs) != len(g.vs):
+        logger.debug("Contains cycle")
+        in_dag_vs, in_longest_path = calc_longest_path(direction="IN")
+        dag_vs.update(in_dag_vs)
+        longest_path_es.update(in_longest_path)
+        longest_path_vs.update([vname
+                                for es in in_longest_path
+                                for vname in es])
+    # Keep only the longest path(s) as simple path(s) in the CC, and output
+    # the other paths as isolated components.
+    edges = []
+    for e in g.es:
+        if e["source"] in dag_vs and e["target"] in dag_vs:   # acyclic part
+            if (e["source"], e["target"]) in longest_path_es:   # primary
+                edges.append(e.attributes())
+            elif (e["source"] not in longest_path_vs
+                  and e["target"] not in longest_path_vs):   # associated
+                edges.append(e.attributes())
+            # NOTE: Edges connecting "primary paths" and "associated paths"
+            #       are excluded here.
+        else:   # cyclic part
+            edges.append(e.attributes())
+    reduced_g = ig.Graph.DictList(edges=edges,
+                                  vertices=None,
+                                  directed=True)
+    logger.info(f"{g.ecount()} -> {reduced_g.ecount()} edges")
+    return reduced_g

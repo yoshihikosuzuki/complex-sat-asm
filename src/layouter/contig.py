@@ -27,7 +27,6 @@ def graphs_to_contigs(sg: ig.Graph,
                       window_size: int = 1000,
                       include_first_read: bool = True,
                       n_core: int = 1):
-    # TODO: Change the order so that total bases per core are even
     args = [(f"cc{i}_{j} {e['edges'][0]['source']} -> {e['edges'][-1]['target']}",
              e["edges"])
             for i, cc in enumerate(remove_revcomp_graph(sg))
@@ -35,6 +34,13 @@ def graphs_to_contigs(sg: ig.Graph,
                 reduce_simple_paths(
                     reduce_transitive_edges(
                         remove_spur_edges(cc))).es)]
+    # Change the order so that the total bases per core are even
+    rows = [i // 2 if i % 2 == 0 else len(args) - 1 - i // 2
+            for i in range(len(args))]
+    args = sorted(args,
+                  key=lambda x: sum([e["length"] for e in x[1]]),
+                  reverse=True)
+    args = [args[i] for i in rows]
     n_part = -(-len(args) // n_core)
     contigs = []
     with NoDaemonPool(n_core) as pool:

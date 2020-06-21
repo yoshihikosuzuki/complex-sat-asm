@@ -1,5 +1,6 @@
 from typing import List
 from collections import defaultdict
+from statistics import mean, stdev
 from logzero import logger
 from BITS.util.union_find import UnionFind
 from ..type import Overlap
@@ -83,5 +84,63 @@ def remove_contained_reads(overlaps: List[Overlap]) -> List[Overlap]:
                                     (o.a_read_id not in contained_ids
                                      and o.b_read_id not in contained_ids),
                                     overlaps))
+    logger.info(f"{len(overlaps)} -> {len(filtered_overlaps)} overlaps")
+    return filtered_overlaps
+
+
+def adaptive_filter_overlaps(overlaps: List[Overlap],
+                             min_n_ovlp: int,
+                             default_min_ovlp_len: int,
+                             limit_min_ovlp_len: int) -> List[Overlap]:
+    """Filter overlaps by length and sequence dissimilarity by adaptively
+    changing the thresholds for individual read, considering the number of
+    overlaps at prefix and suffix of each read.
+    """
+    # TODO: what is the difference with "best-N-overlaps" strategy?
+
+    def _filter_overlaps(_overlaps: List[Overlap]) -> List[Overlap]:
+        """Filter overlaps with adaptive threshold of minimum overlap length
+        ranging [`limit_min_ovlp_len`, `default_min_ovlp_len`]."""
+        if len(_overlaps) == 0:
+            return _overlaps
+        olens = [o.length for o in _overlaps]
+        min_len = max(min((min(olens) if len(_overlaps) < min_n_ovlp
+                           else sorted(olens, reverse=True)[min_n_ovlp - 1]),
+                          default_min_ovlp_len),
+                      limit_min_ovlp_len)
+        return list(filter(lambda o: o.length >= min_len,
+                           _overlaps))
+
+    filtered_overlaps = []
+    overlaps_per_read = defaultdict(list)
+    for o in overlaps:
+        overlaps_per_read[o.a_read_id].append(o)
+        overlaps_per_read[o.b_read_id].append(o.swap())
+
+    for read_id, _overlaps in overlaps_per_read.items():
+        # Filter overlaps with adaptive min overlap length threshold
+        # NOTE: contained overlaps are counted twice in pre and suf
+        pre_overlaps = _filter_overlaps(list(filter(lambda o: o.a_start == 0,
+                                                    _overlaps)))
+        suf_overlaps = _filter_overlaps(list(filter(lambda o: o.a_end == o.a_len,
+                                                    _overlaps)))
+        contains_overlaps = list(filter(lambda o:
+                                        (o.type == "contains"
+                                         and o.length >= default_min_ovlp_len),
+                                        _overlaps))
+        _overlaps = sorted(set(pre_overlaps
+                               + suf_overlaps
+                               + contains_overlaps))
+        # Filter overlaps with adaptive overlap seq diff threshold
+        # NOTE: this is in order to exclude false contained overlaps
+        diffs = [o.diff for o in _overlaps]
+        max_diff = mean(diffs) + 2 * stdev(diffs)   # TODO: rationale?
+        _overlaps = list(filter(lambda o: o.diff <= max_diff, _overlaps))
+
+        filtered_overlaps += _overlaps
+    # Merge overlaps and remove duplicated overlaps
+    filtered_overlaps = sorted(set([o if o.a_read_id < o.b_read_id
+                                    else o.swap()
+                                    for o in filtered_overlaps]))
     logger.info(f"{len(overlaps)} -> {len(filtered_overlaps)} overlaps")
     return filtered_overlaps
