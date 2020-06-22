@@ -30,25 +30,6 @@ def remove_revcomp_graph(g: ig.Graph) -> List[ig.Graph]:
     return cc
 
 
-def remove_revcomp_paths(g: ig.Graph) -> ig.Graph:
-    """Remove revcomp paths in a single string graph."""
-    assert len(g.cluster(mode="weak").subgraphs()) == 1, \
-        "`g` must contain only a single connected component."
-    forward_vnames = {v["name"] for v in g.vs}
-    revcomp_vnames = {f"{read_id}:{'B' if node_type == 'E' else 'E'}"
-                      for vname in forward_vnames
-                      for read_id, node_type in vname.split(':')}
-    if forward_vnames & revcomp_vnames == 0:
-        return g
-    logger.debug("Forward + revcomp graph")
-    vnames = forward_vnames - revcomp_vnames
-    removed_g = ig.DictList(edges=[e.attributes() for e in g.es
-                                   if e["source"] in vnames and e["target"] in vnames],
-                            vertices=None, directed=True)
-    logger.info(f"{g.vcount()} -> {removed_g.vcount()} nodes")
-    return removed_g
-
-
 def reduce_transitive_edges(sg: ig.Graph,
                             fuzz: int = 200) -> ig.Graph:
     """Reduce transitive edges [Myers, 2005].
@@ -244,11 +225,13 @@ def find_longest_path(g: ig.Graph) -> ig.Graph:
         # Backtrace
         path = []
         v = t
-        while v is not None:
+        while True:
             w = prev_edge[v]
+            if w is None:
+                break
             path.append((w, v))
             v = w
-        path = reversed(path)
+        path = list(reversed(path))
         logger.debug(f"Longest path ({direction}): {path}")
         # NOTE: Always return path in OUT direction as these edges are true.
         return dag_vs, path

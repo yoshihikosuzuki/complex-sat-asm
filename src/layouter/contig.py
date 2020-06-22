@@ -13,27 +13,23 @@ from BITS.seq.util import reverse_seq, revcomp_seq
 from BITS.util.proc import NoDaemonPool
 from ..type import TRRead, Overlap
 from ..overlapper.align_proper import can_be_query
-from .graph import (remove_revcomp_graph, reduce_transitive_edges,
-                    remove_spur_edges, reduce_simple_paths)
 
 er_global = EdlibRunner("global", revcomp=False)
 er_prefix = EdlibRunner("prefix", revcomp=False)
 
 
-def graphs_to_contigs(sg: ig.Graph,
+def graphs_to_contigs(sg_ccs: ig.Graph,
                       overlaps: List[Overlap],
                       reads_by_id: Dict[int, TRRead],
                       max_diff: float = 0.02,
                       window_size: int = 1000,
                       include_first_read: bool = True,
                       n_core: int = 1):
+    """Nodes and edges in the string graph must be reduced in advance."""
     args = [(f"cc{i}_{j} {e['edges'][0]['source']} -> {e['edges'][-1]['target']}",
              e["edges"])
-            for i, cc in enumerate(remove_revcomp_graph(sg))
-            for j, e in enumerate(
-                reduce_simple_paths(
-                    reduce_transitive_edges(
-                        remove_spur_edges(cc))).es)]
+            for i, g in enumerate(sg_ccs)
+            for j, e in enumerate(g.es)]
     # Change the order so that the total bases per core are even
     rows = [i // 2 if i % 2 == 0 else len(args) - 1 - i // 2
             for i in range(len(args))]

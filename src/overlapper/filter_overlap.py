@@ -2,6 +2,7 @@ from typing import List
 from collections import defaultdict
 from statistics import mean, stdev
 from logzero import logger
+from BITS.plot.plotly import make_hist, make_layout, show_plot
 from BITS.util.union_find import UnionFind
 from ..type import Overlap
 
@@ -51,25 +52,27 @@ def filter_overlaps(overlaps: List[Overlap],
     return filtered_overlaps
 
 
-def best_overlaps_per_pair(overlaps: List[Overlap]) -> List[Overlap]:
+def best_overlaps_per_pair(overlaps: List[Overlap],
+                           by: str = "diff") -> List[Overlap]:
     """For each read pair (considering strand), keep only the best overlap."""
-    # TODO: what is "best" for overlaps? score? length?
+    def is_better(o1: Overlap, o2: Overlap) -> bool:
+        if by == "diff":
+            return (o1.diff < o2.diff
+                    or (o1.diff == o2.diff and o1.length > o2.length))
+        else:   # "length"
+            return (o1.length > o2.length
+                    or (o1.length == o2.length and o1.diff < o2.diff))
+
+    assert by in ("diff", "length"), "`by` must be one of {'diff', 'length'}"
     ovlp_by_pair = {}
     for o in overlaps:
-        read_pair = (o.a_read_id, o.b_read_id, o.strand)
+        read_pair = (o.a_read_id, o.b_read_id)
         if (read_pair not in ovlp_by_pair
-            or o.diff < ovlp_by_pair[read_pair].diff
-            or (o.diff == ovlp_by_pair[read_pair].diff
-                and o.a_end - o.a_start > ovlp_by_pair[read_pair].a_end - ovlp_by_pair[read_pair].a_start)):
+                or is_better(o, ovlp_by_pair[read_pair])):
             ovlp_by_pair[read_pair] = o
     best_overlaps = sorted(ovlp_by_pair.values())
     logger.info(f"{len(overlaps)} -> {len(best_overlaps)} overlaps")
     return best_overlaps
-
-
-def best_overlaps(overlaps):
-    """Best-overlap logic, i.e., keep only one best in-edge and one best out-edge for each read."""
-    pass
 
 
 def remove_contained_reads(overlaps: List[Overlap]) -> List[Overlap]:
@@ -91,7 +94,9 @@ def remove_contained_reads(overlaps: List[Overlap]) -> List[Overlap]:
 def adaptive_filter_overlaps(overlaps: List[Overlap],
                              min_n_ovlp: int,
                              default_min_ovlp_len: int,
-                             limit_min_ovlp_len: int) -> List[Overlap]:
+                             limit_min_ovlp_len: int,
+                             filter_by_diff: bool = True,
+                             plot: bool = False) -> List[Overlap]:
     """Filter overlaps by length and sequence dissimilarity by adaptively
     changing the thresholds for individual read, considering the number of
     overlaps at prefix and suffix of each read.
@@ -108,15 +113,17 @@ def adaptive_filter_overlaps(overlaps: List[Overlap],
                            else sorted(olens, reverse=True)[min_n_ovlp - 1]),
                           default_min_ovlp_len),
                       limit_min_ovlp_len)
+        min_lens.append(min_len)
         return list(filter(lambda o: o.length >= min_len,
                            _overlaps))
 
-    filtered_overlaps = []
     overlaps_per_read = defaultdict(list)
     for o in overlaps:
         overlaps_per_read[o.a_read_id].append(o)
         overlaps_per_read[o.b_read_id].append(o.swap())
 
+    filtered_overlaps = []
+    min_lens, max_diffs = [], []   # for plot
     for read_id, _overlaps in overlaps_per_read.items():
         # Filter overlaps with adaptive min overlap length threshold
         # NOTE: contained overlaps are counted twice in pre and suf
@@ -131,11 +138,13 @@ def adaptive_filter_overlaps(overlaps: List[Overlap],
         _overlaps = sorted(set(pre_overlaps
                                + suf_overlaps
                                + contains_overlaps))
-        # Filter overlaps with adaptive overlap seq diff threshold
-        # NOTE: this is in order to exclude false contained overlaps
-        diffs = [o.diff for o in _overlaps]
-        max_diff = mean(diffs) + 2 * stdev(diffs)   # TODO: rationale?
-        _overlaps = list(filter(lambda o: o.diff <= max_diff, _overlaps))
+        if filter_by_diff and len(_overlaps) >= 2:
+            # Filter overlaps with adaptive overlap seq diff threshold
+            # NOTE: this is in order to exclude false contained overlaps
+            diffs = [o.diff for o in _overlaps]
+            max_diff = mean(diffs) + 2 * stdev(diffs)   # TODO: rationale?
+            max_diffs.append(max_diff * 100)
+            _overlaps = list(filter(lambda o: o.diff <= max_diff, _overlaps))
 
         filtered_overlaps += _overlaps
     # Merge overlaps and remove duplicated overlaps
@@ -143,4 +152,12 @@ def adaptive_filter_overlaps(overlaps: List[Overlap],
                                     else o.swap()
                                     for o in filtered_overlaps]))
     logger.info(f"{len(overlaps)} -> {len(filtered_overlaps)} overlaps")
+    if plot:
+        show_plot(make_hist(min_lens, bin_size=500),
+                  make_layout(x_title="Min overlap length at boundaries [bp]",
+                              y_title="Frequency"))
+        if filter_by_diff:
+            show_plot(make_hist(max_diffs, bin_size=0.1),
+                      make_layout(x_title="Max sequence dissimilarity per read [%]",
+                                  y_title="Frequency"))
     return filtered_overlaps
