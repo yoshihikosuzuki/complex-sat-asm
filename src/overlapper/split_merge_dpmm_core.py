@@ -65,6 +65,10 @@ class ClusteringSeqSMD(ClusteringSeq):
         # NOTE: unnecessary for "deterministic" Gibbs sampling
         # self._const_gibbs = -np.log10(self.N - 1 + self.alpha)
 
+        # NOTE: limit number of split proposals to the same cluster in a
+        #       single proposal loop
+        #self.n_proposals = Counter()
+
     def show(self):
         for cons in sorted(self._generate_consensus(),
                            key=lambda x: x.cluster_id):
@@ -121,22 +125,22 @@ class ClusteringSeqSMD(ClusteringSeq):
     def cluster_cons_seq(self,
                          cluster_id: int,
                          except_id: Optional[int] = None) -> str:
-        data_ids = tuple(self.cluster_except(cluster_id,
-                                             except_id,
-                                             return_where=True))
-        if data_ids in self._cache_cons_seq:
-            # logger.debug("cluster_cons_seq: cache hit "
-            #             f"(cluster {cluster_id} except {except_id})")
-            return self._cache_cons_seq[data_ids]
-        seqs = list(self.cluster_except(cluster_id, except_id))
+        # NO EXCLUDE
+        #data_ids = tuple(self.cluster(cluster_id,
+        #                              return_where=True))
+        seqs = tuple(set(self.cluster(cluster_id)))
         if len(seqs) == 0:   # The cluster has disappeared
             return ""
-        cons_seq = consed.consensus(seqs, seed_choice="median")
+        if seqs in self._cache_cons_seq:
+            return self._cache_cons_seq[seqs]
+        else:
+            logger.debug(f"Cache mis: cluster {cluster_id} "
+                         f"({self.cluster_size(cluster_id)})")
+        cons_seq = consed.consensus(list(seqs), seed_choice="median")
         if cons_seq == "":
             logger.warning("Consed failed. Try alt_consensus")
-            cons_seq = consensus_alt(seqs, seed_choice="median")
-            assert len(cons_seq) > 0
-        self._cache_cons_seq[data_ids] = cons_seq
+            cons_seq = consensus_alt(list(seqs), seed_choice="median")
+        self._cache_cons_seq[seqs] = cons_seq
         return cons_seq
 
     def logp_clustering(self) -> float:
@@ -219,6 +223,7 @@ class ClusteringSeqSMD(ClusteringSeq):
         fcigar = self.er.align(cons_seq, obs_seq).cigar.flatten()
         # Calculate the sum of log probabilities for each position in the alignment
         if obs_qual is None:
+            # TODO: do the same thing when obs_qual is constant
             p_non_match = 0.01   # TODO: magic number for CCS!
             n_match = Counter(fcigar)['=']
             n_non_match = len(fcigar) - n_match
@@ -291,7 +296,7 @@ class ClusteringSeqSMD(ClusteringSeq):
                                              except_id=data_id)
             logp = (0.  # self.const_gibbs
                     + np.log10(cluster_size)
-                    + self._logp_seq_generate(cons_seq, data_id))   # TODO: cache logp_gen?
+                    + self._logp_seq_generate(cons_seq, data_id))
             if logp > max_logp:
                 max_logp = logp
                 max_cluster_id = cluster_id
@@ -366,8 +371,10 @@ class ClusteringSeqSMD(ClusteringSeq):
         if p_current < p_propose:
             logger.debug(f"Split: {p_current:.0f} -> {p_propose:.0f}")
             self.normalize_assignments()
+            #self.n_proposals[old_cluster_id] = 0   # reset
         else:
             self.assignments = original_assignments
+            #self.n_proposals[old_cluster_id] += 1
 
     def _merge(self,
                data_i: int,

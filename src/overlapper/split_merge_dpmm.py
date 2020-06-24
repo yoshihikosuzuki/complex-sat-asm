@@ -61,7 +61,6 @@ class SplitMergeDpmmOverlapper:
             out_fname=self.out_fname,
             log_level="debug" if self.verbose else "info")
         save_pickle(labeled_reads, self.out_fname)
-        # TODO: ava overlap among labeled_reads
 
 
 def run_smdc_multi(sync_reads: List[Tuple[int, List[TRRead]]],
@@ -85,7 +84,6 @@ def run_smdc(read_id: int,
     assert all([read.synchronized for read in reads]), "Synchronize first"
 
     units = [unit_seq for read in reads for unit_seq in read.unit_seqs]
-    # TODO: adjust quals? (CCS fastq looks to overestimate accuracy)
     quals = [qual for read in reads for qual in read.unit_quals]
     smdc = ClusteringSeqSMD(units, quals, alpha, p_error)
 
@@ -102,6 +100,7 @@ def run_smdc(read_id: int,
     # TODO: remove single "outlier" units?
     # (probably from regions covered only once by these reads right here)
     smdc.gibbs_full(no_p_old=True)
+    smdc.normalize_assignments()
     logger.debug(f"Assignments after full-scan Gibbs:\n{smdc.assignments}")
 
     # Perform split-merge samplings until convergence
