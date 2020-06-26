@@ -99,7 +99,7 @@ def run_smdc(read_id: int,
     logger.debug(f"Hierarchical clustering assignments:\n{smdc.assignments}")
     # TODO: remove single "outlier" units?
     # (probably from regions covered only once by these reads right here)
-    smdc.gibbs_full(no_p_old=True)
+    smdc.gibbs_full()
     smdc.normalize_assignments()
     logger.debug(f"Assignments after full-scan Gibbs:\n{smdc.assignments}")
 
@@ -108,7 +108,8 @@ def run_smdc(read_id: int,
     p_counts = Counter()   # for oscillation
     count, inf_count = 0, 0
     while count < 2:
-        smdc.split_merge(max(smdc.n_clusters * 10, 100))
+        smdc.split_merge(max(smdc.n_clusters * 10, 100),
+                         split_init_how="nearest")
         smdc.gibbs_full()
         p = f"{smdc.logp_clustering():.0f}"
         if p == "-inf" or prev_p == "-inf":
@@ -129,6 +130,8 @@ def run_smdc(read_id: int,
             count = 0
         prev_p = p
         p_counts[p] += 1
+    smdc.merge_ava()
+    smdc.normalize_assignments()
     logger.debug(f"Finished read {read_id}")
 
     # Update representative units and assignments

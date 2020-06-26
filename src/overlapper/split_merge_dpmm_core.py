@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, Sequence, List, Tuple
+from typing import Optional, Sequence, List, Tuple, Dict
 from collections import defaultdict, Counter
 import random
 import numpy as np
@@ -7,7 +7,6 @@ from logzero import logger
 import consed
 from BITS.clustering.seq import ClusteringSeq
 from BITS.seq.alt_consensus import consensus_alt, count_discrepants
-
 
 PHRED_TO_LOGP_ERROR = [-phred / 10 for phred in range(94)]
 PHRED_TO_LOGP_CORRECT = [-np.inf if phred == 0
@@ -55,6 +54,7 @@ class ClusteringSeqSMD(ClusteringSeq):
         self._cache_logp_cluster = {}   # {tuple(data_ids): logp_cluster}
         self._cache_cons_seq = {}   # {tuple(data_ids): cons_seq}
         self._cache_gen_seq = {}   # {tuple(cons_seq, obs_seq): logp_gen}
+        self._cache_svs_dist = {}   # {(seq1, seq2): diff}
         # Precompute constants
         self._log_factorial = np.zeros(self.N + 1, dtype=np.float32)
         self._log_factorial[0] = -np.inf
@@ -64,10 +64,6 @@ class ClusteringSeqSMD(ClusteringSeq):
                                      for i in range(self.N)])
         # NOTE: unnecessary for "deterministic" Gibbs sampling
         # self._const_gibbs = -np.log10(self.N - 1 + self.alpha)
-
-        # NOTE: limit number of split proposals to the same cluster in a
-        #       single proposal loop
-        #self.n_proposals = Counter()
 
     def show(self):
         for cons in sorted(self._generate_consensus(),
@@ -125,22 +121,29 @@ class ClusteringSeqSMD(ClusteringSeq):
     def cluster_cons_seq(self,
                          cluster_id: int,
                          except_id: Optional[int] = None) -> str:
-        # NO EXCLUDE
-        #data_ids = tuple(self.cluster(cluster_id,
-        #                              return_where=True))
-        seqs = tuple(set(self.cluster(cluster_id)))
-        if len(seqs) == 0:   # The cluster has disappeared
+        # Exclude data only when the cluster is small
+        if self.cluster_size(cluster_id) <= 5:
+            data_ids = tuple(self.cluster_except(cluster_id,
+                                                 except_id,
+                                                 return_where=True))
+            seqs = list(self.cluster_except(cluster_id,
+                                            except_id))
+        else:
+            data_ids = tuple(self.cluster(cluster_id,
+                                          return_where=True))
+            seqs = list(self.cluster(cluster_id))
+        if len(data_ids) == 0:   # The cluster has disappeared
             return ""
-        if seqs in self._cache_cons_seq:
-            return self._cache_cons_seq[seqs]
+        if data_ids in self._cache_cons_seq:
+            return self._cache_cons_seq[data_ids]
         else:
             logger.debug(f"Cache mis: cluster {cluster_id} "
-                         f"({self.cluster_size(cluster_id)})")
-        cons_seq = consed.consensus(list(seqs), seed_choice="median")
+                         f"(size={self.cluster_size(cluster_id)})")
+        cons_seq = consed.consensus(seqs, seed_choice="median")
         if cons_seq == "":
             logger.warning("Consed failed. Try alt_consensus")
-            cons_seq = consensus_alt(list(seqs), seed_choice="median")
-        self._cache_cons_seq[seqs] = cons_seq
+            cons_seq = consensus_alt(seqs, seed_choice="median")
+        self._cache_cons_seq[data_ids] = cons_seq
         return cons_seq
 
     def logp_clustering(self) -> float:
@@ -148,8 +151,6 @@ class ClusteringSeqSMD(ClusteringSeq):
         p = (self._logp_ewens()
              + np.sum([self._logp_cluster(cluster_id)
                        for cluster_id in self.cluster_ids]))
-        if p == -np.inf:
-            logger.warning("!!!!! -inf clustering logp !!!!!")
         return p
 
     def _logp_ewens(self) -> float:
@@ -157,20 +158,19 @@ class ClusteringSeqSMD(ClusteringSeq):
              + self.n_clusters * np.log10(self.alpha)
              + np.sum([self._log_factorial[self.cluster_size(cluster_id) - 1]
                        for cluster_id in self.cluster_ids]))
-        logger.debug(f"logp ewens = {p:.0f}")
+        #logger.debug(f"logp ewens = {p:.0f}")
         return p
 
     def _logp_cluster(self,
                       cluster_id: int) -> float:
         data_ids = tuple(self.cluster(cluster_id, return_where=True))
         if data_ids in self._cache_logp_cluster:
-            # logger.debug("_logp_cluster: cache hit "
-            #             f"(cluster {cluster_id})")
             return self._cache_logp_cluster[data_ids]
         p = (self._logp_cluster_composition(cluster_id)
              + self._logp_seqs_generate(cluster_id))
         self._cache_logp_cluster[data_ids] = p
-        logger.debug(f"logp cluster {cluster_id} = {p:.0f}")
+        logger.debug(f"logp cluster {cluster_id} (size={self.cluster_size(cluster_id)}) "
+                     f"= {p:.0f}")
         return p
 
     def _logp_cluster_composition(self,
@@ -199,6 +199,9 @@ class ClusteringSeqSMD(ClusteringSeq):
                 p_dis += count * np.log10(self.p_error)
             # number of units having base same as seed
             n_match = len(obs_seqs) - np.sum(list(counts.values()))
+            if n_match == 0:
+                # NOTE: this happens when distant clustes are merged
+                return -np.inf
             p_dis -= self._log_factorial[n_match]
             p_dis += n_match * np.log10(1 - self.p_error)
         return p_match + p_dis
@@ -215,20 +218,24 @@ class ClusteringSeqSMD(ClusteringSeq):
     def _logp_seq_generate(self,
                            cons_seq: str,
                            data_id: int) -> float:
-        if (cons_seq, data_id) in self._cache_gen_seq:
-            return self._cache_gen_seq[(cons_seq, data_id)]
         if cons_seq == "":
             return -np.inf
+        if (cons_seq, data_id) in self._cache_gen_seq:
+            return self._cache_gen_seq[(cons_seq, data_id)]
         obs_seq, obs_qual = self.data[data_id], self.quals[data_id]
         fcigar = self.er.align(cons_seq, obs_seq).cigar.flatten()
         # Calculate the sum of log probabilities for each position in the alignment
         if obs_qual is None:
-            # TODO: do the same thing when obs_qual is constant
-            p_non_match = 0.01   # TODO: magic number for CCS!
             n_match = Counter(fcigar)['=']
             n_non_match = len(fcigar) - n_match
-            p = (n_match * np.log10(1 - p_non_match)
-                 + n_non_match * np.log10(p_non_match))
+            p = (n_match * np.log10(1 - self.p_error)
+                 + n_non_match * np.log10(self.p_error))
+        elif len(set(obs_qual)) == 1:
+            phred = obs_qual[0]
+            n_match = Counter(fcigar)['=']
+            n_non_match = len(fcigar) - n_match
+            p = (n_match * PHRED_TO_LOGP_CORRECT[phred]
+                 + n_non_match * PHRED_TO_LOGP_ERROR[phred])
         else:
             p = 0.
             pos = 0
@@ -243,43 +250,77 @@ class ClusteringSeqSMD(ClusteringSeq):
         return p
 
     def gibbs_full(self,
-                   n_iter: int = 2,
-                   no_p_old: bool = False):
+                   max_n_iter: int = 5):
         """Perform full scans of Gibbs sampling.
-        Use `no_p_old=True` if the current clustering state is not good."""
-        p_old = None if no_p_old else self.logp_clustering()
-        self._gibbs(list(range(self.N)), self.cluster_ids, n_iter)
-        p_new = self.logp_clustering()
-        logger.info(f"Full Gibbs x{n_iter}: "
-                    f"{p_old:{'' if no_p_old else '.0f'}} "
-                    f"-> {p_new:.0f}")
+        Use `no_fisrt_p=True` if the current clustering state is not good."""
+        for t in range(max_n_iter):
+            logger.debug(f"Full Gibbs {t}(/{max_n_iter})")
+            p_old = self.logp_clustering()
+            n_clusters_old = self.n_clusters
+            self._gibbs(list(range(self.N)), self.cluster_ids)
+            p_new = self.logp_clustering()
+            n_clusters_new = self.n_clusters
+            logger.info(f"Full Gibbs {t}(/{max_n_iter}): "
+                        f"{p_old:.0f} ({n_clusters_old} clusters) -> "
+                        f"{p_new:.0f} ({n_clusters_new} clusters)")
+            if p_new != -np.inf and p_old == p_new:
+                logger.info("Full Gibbs converged")
+                break
 
     def _gibbs_restricted(self,
                           cluster_i: int,
                           cluster_j: int,
-                          n_iter: int):
+                          max_n_iter: int):
         """Perform resticted Gibbs sampling among the two clusters."""
-        data_ids = np.concatenate([self.cluster(cluster_i, return_where=True),
-                                   self.cluster(cluster_j, return_where=True)])
-        self._gibbs(data_ids, [cluster_i, cluster_j], n_iter)
+        for t in range(max_n_iter):
+            data_ids = np.concatenate([self.cluster(cluster_i, return_where=True),
+                                       self.cluster(cluster_j, return_where=True)])
+            cluster_ids = [cluster_i, cluster_j]
+            cluster_size_cons = {cluster_id: (self.cluster_size(cluster_id),
+                                              self.cluster_cons_seq(cluster_id))
+                                 for cluster_id in cluster_ids}
+
+            p_old = self.logp_clustering()
+            for i, data_id in enumerate(data_ids):
+                self.assignments[data_id] = self._gibbs_restricted_single(data_id,
+                                                                          cluster_size_cons)
+            p_new = self.logp_clustering()
+            logger.info(f"Restricted Gibbs {t}(/{max_n_iter}): "
+                        f"{p_old:.0f} -> {p_new:.0f}")
+            if p_new == -np.inf or p_old == p_new:
+                logger.info("Restricted Gibbs converged")
+                break
+
+    def _gibbs_restricted_single(self,
+                                 data_id: int,
+                                 cluster_size_cons: Dict[int, Tuple[int, str]]) -> int:
+        """Assign a single data to one of the clusters with fixed consensus sequences."""
+        max_logp = -np.inf
+        max_cluster_id = -1
+        for cluster_id, (cluster_size, cluster_cons_seq) in cluster_size_cons.items():
+            if cluster_size == 0:
+                continue
+            logp = (0.  # self.const_gibbs
+                    + np.log10(cluster_size)
+                    + self._logp_seq_generate(cluster_cons_seq, data_id))
+            if logp > max_logp:
+                max_logp = logp
+                max_cluster_id = cluster_id
+        return max_cluster_id
 
     def _gibbs(self,
                data_ids: Sequence[int],
-               cluster_ids: Sequence[int],
-               n_iter: int):
+               cluster_ids: Sequence[int]):
         """Perform Gibbs sampling within specified data and clusters."""
-        for t in range(n_iter):
-            logger.debug(f"Gibbs {t}/{n_iter}")
-            for i, data_id in enumerate(data_ids):
-                if i % 10 == 0:
-                    logger.debug(f"Data {i}/{len(data_ids)}")
-                old_assignment = self.assignments[data_id]
-                self.assignments[data_id] = self._gibbs_single(data_id,
-                                                               cluster_ids)
-                new_assignment = self.assignments[data_id]
-                if old_assignment != new_assignment:
-                    logger.debug(f"data {data_id}: cluster "
-                                 f"{old_assignment} -> {new_assignment}")
+        for i, data_id in enumerate(data_ids):
+            if i % 10 == 0:
+                logger.debug(f"Data {i}/{len(data_ids)}")
+            old_assignment = self.assignments[data_id]
+            self.assignments[data_id] = self._gibbs_single(data_id,
+                                                           cluster_ids)
+            if self.assignments[data_id] != old_assignment:
+                logger.debug(f"data {data_id}: cluster "
+                             f"{old_assignment} -> {self.assignments[data_id]}")
 
     def _gibbs_single(self,
                       data_id: int,
@@ -305,85 +346,142 @@ class ClusteringSeqSMD(ClusteringSeq):
     def split_merge(self,
                     n_iter: int,
                     split_init_how: str = "random",
-                    split_gibbs_n_iter: int = 2):
+                    split_gibbs_max_n_iter: int = 5,
+                    merge_max_cons_diff: float = 0.03):
         p_old = self.logp_clustering()
+        n_clusters_old = self.n_clusters
         for t in range(n_iter):
             if t % 10 == 0:
                 logger.debug(f"Proposal {t}/{n_iter}")
             self._split_merge_single(split_init_how,
-                                     split_gibbs_n_iter)
+                                     split_gibbs_max_n_iter,
+                                     merge_max_cons_diff)
         p_new = self.logp_clustering()
-        logger.info(f"SM x{n_iter}: {p_old:.0f} -> {p_new:.0f}")
+        n_clusters_new = self.n_clusters
+        logger.info(f"SM x{n_iter}: "
+                    f"{p_old:.0f} ({n_clusters_old} clusters) -> "
+                    f"{p_new:.0f} ({n_clusters_new} clusters)")
 
     def _split_merge_single(self,
                             split_init_how: str,
-                            split_gibbs_n_iter: int):
+                            split_gibbs_max_n_iter: int,
+                            merge_max_cons_diff: float):
         data_i, data_j = random.sample(list(range(self.N)), 2)
         if self.assignments[data_i] == self.assignments[data_j]:
             self._split(data_i,
                         data_j,
                         split_init_how,
-                        split_gibbs_n_iter)
+                        split_gibbs_max_n_iter)
         else:
-            self._merge(data_i, data_j)
+            self._merge(data_i, data_j, merge_max_cons_diff)
+
+    def merge_ava(self,
+                  max_cons_diff: float = 0.03):
+        """Try merge proposals for every possible pair of clusters.
+        Run this at the end of the clustering."""
+        old_assignments = np.copy(self.assignments)
+        for cluster_id_i in self.cluster_ids:
+            for cluster_id_j in self.cluster_ids:
+                if cluster_id_i >= cluster_id_j:
+                    continue
+                self._merge(self.cluster(cluster_id_i, return_where=True)[0],
+                            self.cluster(cluster_id_j, return_where=True)[0],
+                            max_cons_diff)
+                if not (self.assignments == old_assignments).all():
+                    # Retry from beginning
+                    self.merge_ava()
+                    return
 
     def _split(self,
                data_i: int,
                data_j: int,
                init_how: str,
-               gibbs_n_iter: int):
+               gibbs_max_n_iter: int):
         def random_assignments():
             self.assignments[data_j] = new_cluster_id
             for i in self.cluster(old_cluster_id, return_where=True):
-                assert i != data_j
                 if i == data_i:
                     continue
                 self.assignments[i] = random.choice((old_cluster_id,
                                                      new_cluster_id))
 
         def nearest_assignments():
-            # NOTE: 収束は早くなるがクラスタリング精度は下がると思われる(よりEM的になる)
-            pass
+            """Choose the initial assignment for every data except the two data
+            by greedily selecting the nearest out of the two data."""
+            self.assignments[data_j] = new_cluster_id
+            for x in self.cluster(old_cluster_id, return_where=True):
+                if x == data_i:
+                    continue
+                dist_i = svs_dist(x, data_i)
+                dist_j = svs_dist(x, data_j)
+                self.assignments[x] = (old_cluster_id if dist_i <= dist_j
+                                       else new_cluster_id)
+
+        def svs_dist(i: int, j: int) -> float:
+            seq_i = self.data[i]
+            seq_j = self.data[j]
+            key = tuple(sorted((seq_i, seq_j)))
+            if key not in self._cache_svs_dist:
+                diff = self.er.align(seq_i, seq_j).diff
+                self._cache_svs_dist[key] = diff
+            return self._cache_svs_dist[key]
 
         assert init_how in ("random", "nearest"), \
             "`init_how` must be one of {'random', 'nearest'}"
+        assert self.assignments[data_i] == self.assignments[data_j], \
+            "Two data must belong to the same cluster"
         original_assignments = np.copy(self.assignments)
         p_current = self.logp_clustering()
         # Cluster IDs after split; one is same as the original cluster
         old_cluster_id = self.assignments[data_i]
         new_cluster_id = np.max(self.assignments) + 1
-        logger.debug(
-            f"split {old_cluster_id} -> {old_cluster_id}, {new_cluster_id}")
         # Initial assignments of the data in the cluster into one of the two clusters
         if init_how == "random":
             random_assignments()
         else:
             nearest_assignments()
-        logger.debug(f"Initial assignments:\n{self.assignments}")
+        restricted_assignments = np.array([x if x in (old_cluster_id,
+                                                      new_cluster_id)
+                                           else -1
+                                           for x in self.assignments], dtype=np.int32)
+        logger.debug(f"Initial assignments:\n{restricted_assignments}")
         # Restricted Gibbs sampling within the two clusters
         self._gibbs_restricted(old_cluster_id,
                                new_cluster_id,
-                               n_iter=gibbs_n_iter)
-        logger.debug(
-            f"Assignments after restricted Gibbs:\n{self.assignments}")
-        # Accept the proposal if the probability increases
+                               max_n_iter=gibbs_max_n_iter)
         p_propose = self.logp_clustering()
+        logger.debug(f"{'Accepted' if p_current < p_propose else 'Rejected'} "
+                     f"split {old_cluster_id} -> {old_cluster_id}, {new_cluster_id} "
+                     f"(logp: {p_current:.0f} -> {p_propose:.0f})")
         if p_current < p_propose:
-            logger.debug(f"Split: {p_current:.0f} -> {p_propose:.0f}")
             self.normalize_assignments()
-            #self.n_proposals[old_cluster_id] = 0   # reset
+            logger.debug(f"Updated assignments:\n{self.assignments}")
         else:
             self.assignments = original_assignments
-            #self.n_proposals[old_cluster_id] += 1
 
     def _merge(self,
                data_i: int,
-               data_j: int):
-        # TODO: merge proposal の確率が低すぎる問題を調べる
+               data_j: int,
+               max_cons_diff: float):
         cluster_id_i = self.assignments[data_i]
         cluster_id_j = self.assignments[data_j]
+        assert cluster_id_i != cluster_id_j, \
+            "Two data must belong to different clusters"
+        # Require the two clusters are somewhat close
         cons_seq_i = self.cluster_cons_seq(cluster_id_i)
         cons_seq_j = self.cluster_cons_seq(cluster_id_j)
-        if cons_seq_i == cons_seq_j:
-            logger.debug(f"merged {cluster_id_j} -> {cluster_id_i}")
-            self.merge_cluster(cluster_id_i, cluster_id_j)
+        if self.er.align(cons_seq_i, cons_seq_j).diff > max_cons_diff:
+            return
+        original_assignments = np.copy(self.assignments)
+        p_current = self.logp_clustering()
+        for j in self.cluster(cluster_id_j, return_where=True):
+            self.assignments[j] = cluster_id_i
+        p_propose = self.logp_clustering()
+        logger.debug(f"{'Accepted' if p_current < p_propose else 'Rejected'} "
+                     f"merge {cluster_id_i}, {cluster_id_j} -> "
+                     f"{cluster_id_i} (logp: {p_current:.0f} -> {p_propose:.0f})")
+        if p_current < p_propose:
+            self.normalize_assignments()
+            logger.debug(f"Updated assignments:\n{self.assignments}")
+        else:
+            self.assignments = original_assignments
