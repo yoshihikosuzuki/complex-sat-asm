@@ -442,8 +442,8 @@ class ClusteringSeqSMD(ClusteringSeq):
             nearest_assignments()
         restricted_assignments = np.array([x if x in (old_cluster_id,
                                                       new_cluster_id)
-                                           else -1
-                                           for x in self.assignments], dtype=np.int32)
+                                           else '.'
+                                           for x in self.assignments])
         logger.debug(f"Initial assignments:\n{restricted_assignments}")
         # Restricted Gibbs sampling within the two clusters
         self._gibbs_restricted(old_cluster_id,
