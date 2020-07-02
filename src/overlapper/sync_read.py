@@ -50,9 +50,26 @@ class ReadSynchronizer:
         read_ids = sorted(set([read_id
                                for o in overlaps
                                for read_id in (o.a_read_id, o.b_read_id)]))
+        # Merge reads that have the same set of overlapping reads
+        filtered_read_ids = []
+        added_read_id_set = set()
+        for read_id in read_ids:
+            read_id_set = {read_id}
+            for o in overlaps:
+                if o.a_read_id == read_id:
+                    read_id_set.add(o.b_read_id)
+                elif o.b_read_id == read_id:
+                    read_id_set.add(o.a_read_id)
+            read_id_set = tuple(sorted(read_id_set))
+            if read_id_set not in added_read_id_set:
+                filtered_read_ids.append(read_id)
+                added_read_id_set.add(read_id_set)
+        logger.info("Read IDs for synchronization: "
+                    f"{len(read_ids)} -> {len(filtered_read_ids)}")
+
         save_pickle(run_distribute(
             func=sync_reads,
-            args=read_ids,
+            args=filtered_read_ids,
             shared_args=dict(reads_fname=self.reads_fname,
                              overlaps_fname=self.overlaps_fname,
                              th_ward=self.th_ward,

@@ -347,6 +347,7 @@ class ClusteringSeqSMD(ClusteringSeq):
                     n_iter: int,
                     split_init_how: str = "random",
                     split_gibbs_max_n_iter: int = 5,
+                    merge_how: str = "original",
                     merge_max_cons_diff: float = 0.03):
         p_old = self.logp_clustering()
         n_clusters_old = self.n_clusters
@@ -355,6 +356,7 @@ class ClusteringSeqSMD(ClusteringSeq):
                 logger.debug(f"Proposal {t}/{n_iter}")
             self._split_merge_single(split_init_how,
                                      split_gibbs_max_n_iter,
+                                     merge_how,
                                      merge_max_cons_diff)
         p_new = self.logp_clustering()
         n_clusters_new = self.n_clusters
@@ -365,6 +367,7 @@ class ClusteringSeqSMD(ClusteringSeq):
     def _split_merge_single(self,
                             split_init_how: str,
                             split_gibbs_max_n_iter: int,
+                            merge_how: str,
                             merge_max_cons_diff: float):
         data_i, data_j = random.sample(list(range(self.N)), 2)
         if self.assignments[data_i] == self.assignments[data_j]:
@@ -373,9 +376,13 @@ class ClusteringSeqSMD(ClusteringSeq):
                         split_init_how,
                         split_gibbs_max_n_iter)
         else:
-            self._merge(data_i, data_j, merge_max_cons_diff)
+            self._merge(data_i,
+                        data_j,
+                        merge_how,
+                        merge_max_cons_diff)
 
     def merge_ava(self,
+                  how: str = "original",
                   max_cons_diff: float = 0.03):
         """Try merge proposals for every possible pair of clusters.
         Run this at the end of the clustering."""
@@ -386,6 +393,7 @@ class ClusteringSeqSMD(ClusteringSeq):
                     continue
                 self._merge(self.cluster(cluster_id_i, return_where=True)[0],
                             self.cluster(cluster_id_j, return_where=True)[0],
+                            how,
                             max_cons_diff)
                 if not (self.assignments == old_assignments).all():
                     # Retry from beginning
@@ -462,26 +470,49 @@ class ClusteringSeqSMD(ClusteringSeq):
     def _merge(self,
                data_i: int,
                data_j: int,
+               how: str,
                max_cons_diff: float):
+        assert how in ("original", "perfect"), \
+            "`how` must be one of {'original', 'perfect'}"
         cluster_id_i = self.assignments[data_i]
         cluster_id_j = self.assignments[data_j]
         assert cluster_id_i != cluster_id_j, \
             "Two data must belong to different clusters"
-        # Require the two clusters are somewhat close
         cons_seq_i = self.cluster_cons_seq(cluster_id_i)
         cons_seq_j = self.cluster_cons_seq(cluster_id_j)
-        if self.er.align(cons_seq_i, cons_seq_j).diff > max_cons_diff:
-            return
-        original_assignments = np.copy(self.assignments)
-        p_current = self.logp_clustering()
-        for j in self.cluster(cluster_id_j, return_where=True):
-            self.assignments[j] = cluster_id_i
-        p_propose = self.logp_clustering()
-        logger.debug(f"{'Accepted' if p_current < p_propose else 'Rejected'} "
-                     f"merge {cluster_id_i}, {cluster_id_j} -> "
-                     f"{cluster_id_i} (logp: {p_current:.0f} -> {p_propose:.0f})")
-        if p_current < p_propose:
+
+        def _original():
+            # Require the two clusters are somewhat close
+            if self.er.align(cons_seq_i, cons_seq_j).diff > max_cons_diff:
+                return
+            original_assignments = np.copy(self.assignments)
+            p_current = self.logp_clustering()
+            for j in self.cluster(cluster_id_j, return_where=True):
+                self.assignments[j] = cluster_id_i
+            p_propose = self.logp_clustering()
+            logger.debug(f"{'Accepted' if p_current < p_propose else 'Rejected'} "
+                         f"merge {cluster_id_i}, {cluster_id_j} -> "
+                         f"{cluster_id_i} (logp: {p_current:.0f} -> {p_propose:.0f})")
+            if p_current < p_propose:
+                self.normalize_assignments()
+                logger.debug(f"Updated assignments:\n{self.assignments}")
+            else:
+                self.assignments = original_assignments
+
+        def _perfect():
+            # Allow merge only when the consensus sequences are same
+            if cons_seq_i != cons_seq_j:
+                return
+            p_current = self.logp_clustering()
+            for j in self.cluster(cluster_id_j, return_where=True):
+                self.assignments[j] = cluster_id_i
+            p_propose = self.logp_clustering()
+            logger.debug(f"Accepted merge {cluster_id_i}, {cluster_id_j} -> "
+                         f"{cluster_id_i} (logp: {p_current:.0f} -> {p_propose:.0f})")
             self.normalize_assignments()
             logger.debug(f"Updated assignments:\n{self.assignments}")
+
+        if how == "original":
+            _original()
         else:
-            self.assignments = original_assignments
+            _perfect()

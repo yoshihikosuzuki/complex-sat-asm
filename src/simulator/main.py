@@ -81,10 +81,10 @@ def sample_read(genome: FastaRecord,
                 read_length: int,
                 error_profile: EditWeightsType,
                 index: int) -> FastaRecord:
-    pos = random.randint(0, len(genome.seq) - 1)
+    pos = random.randint(0, genome.length - 1)
     strand = random.randint(0, 1)
     if strand == 0:
-        start, end = pos, min(pos + read_length, len(genome.seq))
+        start, end = pos, min(pos + read_length, genome.length)
         seq = genome.seq[start:end]
     else:
         start, end = max(pos - read_length, 0), pos

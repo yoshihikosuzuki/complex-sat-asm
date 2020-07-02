@@ -19,21 +19,36 @@ class SplitMergeDpmmOverlapper:
       @ sync_reads_fname : File of TR reads.
 
     optional arguments:
-      @ th_ward      : Distance threshold for initial clustering.
-      @ alpha        : Concentration hyperparameter for DPMM.
-      @ p_error      : Average sequencing error rate.
-      @ scheduler    : Scheduler object.
-      @ n_distribute : Number of jobs.
-      @ n_core       : Number of cores per job.
-      @ out_fname    : Output file name.
-      @ tmp_dname    : Name of directory for intermediate files.
-      @ rand_seed    : Seed for random values.
-      @ verbose      : Output debug messages.
+      @ th_ward        : Distance threshold for initial clustering.
+      @ alpha          : Concentration hyperparameter for DPMM.
+      @ p_error        : Average sequencing error rate.
+      @ split_init_how : Specify how initial assignments of a split proposal
+                         are decided.
+                         Must be one of {"random", "nearest"}.
+                         - "random" : Assign each data to one of the two
+                                      clusters at random.
+                         - "nearest": Assign each data to the nearest data
+                                      out of the two randomly chosen data.
+      @ merge_how      : Specify how a merge proposal is treated.
+                         Must be one of {"original", "perfect"}.
+                         - "original" : Merge two clusters if the clustering
+                                        probability increases.
+                         - "perfect"  : Merge if the consensus sequences of
+                                        the two clusters are same.
+      @ scheduler      : Scheduler object.
+      @ n_distribute   : Number of jobs.
+      @ n_core         : Number of cores per job.
+      @ out_fname      : Output file name.
+      @ tmp_dname      : Name of directory for intermediate files.
+      @ rand_seed      : Seed for random values.
+      @ verbose        : Output debug messages.
     """
     sync_reads_fname: str
     th_ward: float = 0.01
     alpha: float = 1.
     p_error: float = 0.01
+    split_init_how: str = "nearest"
+    merge_how: str = "perfect"
     scheduler: Scheduler = Scheduler()
     n_distribute: int = 1
     n_core: int = 1
@@ -52,7 +67,9 @@ class SplitMergeDpmmOverlapper:
             args=load_pickle(self.sync_reads_fname),
             shared_args=dict(th_ward=self.th_ward,
                              alpha=self.alpha,
-                             p_error=self.p_error),
+                             p_error=self.p_error,
+                             split_init_how=self.split_init_how,
+                             merge_how=self.merge_how),
             scheduler=self.scheduler,
             n_distribute=self.n_distribute,
             n_core=self.n_core,
@@ -67,10 +84,18 @@ def run_smdc_multi(sync_reads: List[Tuple[int, List[TRRead]]],
                    th_ward: float,
                    alpha: float,
                    p_error: float,
+                   split_init_how: str,
+                   merge_how: str,
                    n_core: int) -> List[Tuple[int, List[TRRead]]]:
     with NoDaemonPool(n_core) as pool:
         return list(pool.starmap(run_smdc,
-                                 [(read_id, reads, th_ward, alpha, p_error)
+                                 [(read_id,
+                                   reads,
+                                   th_ward,
+                                   alpha,
+                                   p_error,
+                                   split_init_how,
+                                   merge_how)
                                   for read_id, reads in sync_reads]))
 
 
@@ -79,6 +104,8 @@ def run_smdc(read_id: int,
              th_ward: float,
              alpha: float,
              p_error: float,
+             split_init_how: str,
+             merge_how: str,
              n_core: int = 1,
              plot: bool = False) -> Tuple[int, List[TRRead]]:
     assert all([read.synchronized for read in reads]), "Synchronize first"
@@ -109,7 +136,8 @@ def run_smdc(read_id: int,
     count, inf_count = 0, 0
     while count < 2:
         smdc.split_merge(max(smdc.n_clusters * 10, 100),
-                         split_init_how="nearest")
+                         split_init_how=split_init_how,
+                         merge_how=merge_how)
         smdc.gibbs_full()
         p = f"{smdc.logp_clustering():.0f}"
         if p == "-inf" or prev_p == "-inf":
@@ -130,7 +158,7 @@ def run_smdc(read_id: int,
             count = 0
         prev_p = p
         p_counts[p] += 1
-    smdc.merge_ava()
+    smdc.merge_ava(how=merge_how)
     smdc.normalize_assignments()
     logger.debug(f"Finished read {read_id}")
 
