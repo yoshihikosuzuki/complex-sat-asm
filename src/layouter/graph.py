@@ -203,7 +203,6 @@ def find_longest_path(g: ig.Graph) -> ig.Graph:
                      maximal directed acyclic subgraph.
           @ path   : List of edges of the longest path in the maximal DAG.
         """
-        # TODO: fix unexpected behavior of topological sort for multiple main paths
         assert direction in ("IN", "OUT"), \
             "`direction` must be one of {'IN', 'OUT'}"
         v_index_to_name = {v.index: v["name"] for v in g.vs}
@@ -211,15 +210,22 @@ def find_longest_path(g: ig.Graph) -> ig.Graph:
                   for v in (g.topological_sorting() if direction == "OUT"
                             else reversed(g.topological_sorting(mode="IN")))]
         logger.debug(f"Sorted nodes ({direction}): {dag_vs}")
+        if len(dag_vs) == 0:   # Entirely cyclic component
+            return [], []
         # Compute the longest path with DP
         s, t = dag_vs[0], dag_vs[-1]
         dists = {v: float("-inf") for v in dag_vs}
         prev_edge = {v: None for v in dag_vs}
+
+        # TODO: split the job for multiple incoming/outgoing paths
         dists[s] = 0
         for v in dag_vs[:-1]:
+            logger.debug(f"@v={v}")
             for edge in v_to_out_edges(v, g):
+                logger.debug(f"@e={edge['source']}->{edge['target']}")
                 w = edge["target"]
-                if dists[w] < dists[v] + edge["length"]:
+                if w in dists and dists[w] < dists[v] + edge["length"]:
+                    logger.debug(f"updated")
                     dists[w] = dists[v] + edge["length"]
                     prev_edge[w] = v
         # Backtrace
@@ -227,6 +233,7 @@ def find_longest_path(g: ig.Graph) -> ig.Graph:
         v = t
         while True:
             w = prev_edge[v]
+            logger.debug(f"best node for {t} = {w}")
             if w is None:
                 break
             path.append((w, v))
@@ -270,6 +277,7 @@ def find_longest_path(g: ig.Graph) -> ig.Graph:
             elif (e["source"] not in longest_path_vs
                   and e["target"] not in longest_path_vs):   # associated
                 edges.append(e.attributes())
+                # TODO: remove associated paths if they are "narrow"
             # NOTE: Edges connecting "primary paths" and "associated paths"
             #       are excluded here.
         else:   # cyclic part

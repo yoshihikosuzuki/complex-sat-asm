@@ -502,6 +502,8 @@ class ClusteringSeqSMD(ClusteringSeq):
         def _perfect():
             # Allow merge only when the consensus sequences are same
             if cons_seq_i != cons_seq_j:
+                logger.debug(f"Rejected merge {cluster_id_i}, {cluster_id_j} "
+                             f"-> {cluster_id_i}")
                 return
             p_current = self.logp_clustering()
             for j in self.cluster(cluster_id_j, return_where=True):

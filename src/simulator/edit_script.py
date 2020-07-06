@@ -29,6 +29,30 @@ class EditWeightsHomopolymer(NamedTuple):
 EditWeightsType = Union[EditWeights, EditWeightsHomopolymer]
 
 
+def gen_homopolymer_edit_weights(mean_error_rate: float,
+                                 homopolymer_rate: float = 0.8):
+    """Utility for generating homopolymer-skewed edit weights.
+    Use for PacBio sequencing errors.
+    NOTE: The range of `mean_error_rate` is 0-100, not 0-1.
+    """
+    return EditWeightsHomopolymer(100 - mean_error_rate,
+                                  mean_error_rate * homopolymer_rate,
+                                  mean_error_rate * (1 - homopolymer_rate) / 3,
+                                  mean_error_rate * (1 - homopolymer_rate) / 3,
+                                  mean_error_rate * (1 - homopolymer_rate) / 3)
+
+
+def gen_sub_edit_weights(mean_divergence: float,
+                         substitution_rate: float = 0.8):
+    """Utility for generating substitution-skewed edit weights.
+    For example, use for mutating repeat unit sequences.
+    NOTE: The range of `mean_divergence` is 0-100, not 0-1."""
+    return EditWeights(100 - mean_divergence,
+                       mean_divergence * (1 - substitution_rate) / 2,
+                       mean_divergence * (1 - substitution_rate) / 2,
+                       mean_divergence * substitution_rate)
+
+
 def edit_ops_for(edit_weights: EditWeightsType) -> Tuple[str]:
     """Utility for choosing a proper set of edit operations."""
     return (EDIT_OPS if isinstance(edit_weights, EditWeights)
