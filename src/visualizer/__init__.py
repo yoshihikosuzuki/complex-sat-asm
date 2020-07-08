@@ -1,1 +1,1 @@
-from . import read, unit, overlap, graph
+from . import read, unit, overlap, graph, contig

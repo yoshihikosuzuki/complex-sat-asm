@@ -287,3 +287,52 @@ def find_longest_path(g: ig.Graph) -> ig.Graph:
                                   directed=True)
     logger.info(f"{g.ecount()} -> {reduced_g.ecount()} edges")
     return reduced_g
+
+
+def find_strongly_connected_components(g: ig.Graph) -> List[ig.Graph]:
+    def _find_scc(v: ig.Vertex):
+        nonlocal index, stack
+        v["index"] = index
+        v["lowlink"] = index
+        index += 1
+        stack.append(v)
+        v["onstack"] = True
+        for edge in v_to_out_edges(v, g):
+            w = vs_by_name[edge["target"]]
+            if w["index"] == float("inf"):
+                _find_scc(w)
+                v["lowlink"] = min(v["lowlink"], w["lowlink"])
+            elif w["onstack"]:
+                v["lowlink"] = min(v["lowlink"], w["index"])
+        if v["lowlink"] == v["index"]:
+            scc_vs = []
+            while True:
+                w = stack.pop()
+                w["onstack"] = False
+                scc_vs.append(w["name"])
+                if w["name"] == v["name"]:
+                    break
+            sccs.append(scc_vs)   # NOTE: SCC of single node = WCC
+
+    sccs = []
+    vs_by_name = {v["name"]: v for v in g.vs}
+    index = 0
+    stack = []
+    for v in g.vs:
+        v["index"] = float("inf")
+    for v in g.vs:
+        if v["index"] == float("inf"):
+            _find_scc(v)
+    return sccs
+
+
+def separate_cyclic_part(g: ig.Graph) -> List[ig.Graph]:
+    vs_in_cycle = set()
+    for scc in list(filter(lambda x: len(x) > 1,
+                           find_strongly_connected_components(g))):
+        vs_in_cycle.update(scc)
+    return ig.Graph.DictList(edges=[e.attributes()
+                                    for e in g.es
+                                    if (e["source"] in vs_in_cycle) == (e["target"] in vs_in_cycle)],
+                             vertices=None,
+                             directed=True).clusters(mode="weak").subgraphs()
