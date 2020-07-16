@@ -1,13 +1,28 @@
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 from collections import defaultdict
-from logzero import logger
 import plotly.graph_objects as go
+from logzero import logger
+from interval import interval
 from BITS.seq.io import load_fasta
 from BITS.seq.align_affine import align_affine
 from BITS.seq.cigar import Cigar, FlattenCigar
 from BITS.seq.util import revcomp_seq
 from BITS.plot.plotly import make_lines, make_scatter, make_layout, show_plot
+from BITS.util.interval import intvl_len, subtract_intvl
+
+
+@dataclass
+class AssemblyMetrics:
+    n_contigs: int
+    n_ins_units: int
+    n_del_units: int
+    n_missing_units: int
+    n_ins_bases: int
+    n_del_bases: int
+    n_sub_bases: int
+    n_mis_mutations: int
+    p_mis_mutaitons: float
 
 
 @dataclass
@@ -20,53 +35,154 @@ class ContigMapping:
     cigar: Cigar = None
 
 
-def map_hicanu_contigs(true_fname: str,
-                       contigs_fname: str,
-                       read_layouts_fname: str,
-                       read_names_fname: str,
-                       mutation_locations: List[int],
-                       read_length: int):
-    """Draw an alignment plot comparing the true sequence (and mutations on it)
-    and HiCanu contigs.
-
+def calc_hicanu_assembly_metrics(true_seq_fname: str,
+                                 contigs_fname: str,
+                                 read_layouts_fname: str,
+                                 read_names_fname: str,
+                                 mutation_locations: List[int],
+                                 read_length: int,
+                                 plot: bool = False) -> AssemblyMetrics:
+    """
     positional arguments:
-      @ true_fname         : Fasta file of the true sequences.
+      @ true_seq_fname     : Fasta file of the true sequences.
       @ contigs_fname      : Fasta file of HiCanu contigs. '*.contigs.fasta'
       @ read_layouts_fname : '*.contigs.layout.readToTig'
       @ read_names_fname   : '*.seqStore/readNames.txt'
-      @ mutation_locations : Locations of mutations introduced to the true
-                             sequences.
+      @ mutation_locations : Locations of mutations in the true sequences.
+      @ read_length        : Used for removing random flanking sequences.
+
+    optional arguments:
+      @ plot : Show alignment plot between true sequence and contigs.
     """
-    _map_contigs(calc_hicanu_contig_intvls(contigs_fname,
-                                           read_layouts_fname,
-                                           read_names_fname),
-                 true_fname,
-                 contigs_fname,
-                 mutation_locations,
-                 read_length)
+    return _calc_assembly_metrics(calc_hicanu_contig_intvls(contigs_fname,
+                                                            read_layouts_fname,
+                                                            read_names_fname),
+                                  true_seq_fname,
+                                  contigs_fname,
+                                  mutation_locations,
+                                  read_length,
+                                  plot)
 
 
-def map_csa_contigs(true_fname: str,
-                    contigs_fname: str,
-                    reads_fname: str,
-                    mutation_locations: List[int],
-                    read_length: int):
-    """Draw an alignment plot comparing the true sequence (and mutations on it)
-    and CSA contigs.
-
+def calc_csa_assembly_metrics(true_seq_fname: str,
+                              contigs_fname: str,
+                              reads_fname: str,
+                              mutation_locations: List[int],
+                              read_length: int,
+                              plot: bool = False) -> AssemblyMetrics:
+    """
     positional arguments:
-      @ true_fname         : Fasta file of the true sequences.
+      @ true_seq_fname     : Fasta file of the true sequences.
       @ reads_fname        : Fasta file of the reads.
       @ contigs_fname      : Fasta file of CSA contigs.
-      @ mutation_locations : Locations of mutations introduced to the true
-                             sequences.
+      @ mutation_locations : Locations of mutations in the true sequences.
+      @ read_length        : Used for removing random flanking sequences.
+
+    optional arguments:
+      @ plot : Show alignment plot between true sequence and contigs.
     """
-    _map_contigs(calc_csa_contig_intvls(reads_fname,
-                                        contigs_fname),
-                 true_fname,
-                 contigs_fname,
-                 mutation_locations,
-                 read_length)
+    return _calc_assembly_metrics(calc_csa_contig_intvls(reads_fname,
+                                                         contigs_fname),
+                                  true_seq_fname,
+                                  contigs_fname,
+                                  mutation_locations,
+                                  read_length,
+                                  plot)
+
+
+def _calc_assembly_metrics(mappings: List[ContigMapping],
+                           true_seq_fname: str,
+                           contigs_fname: str,
+                           mutation_locations: List[int],
+                           read_length: int,
+                           plot: bool) -> AssemblyMetrics:
+    # Remove duplicated contigs
+    filtered_mappings = filter_mappings(mappings,
+                                        true_seq_fname)
+    # Compute alignments with affine gap penalty
+    filtered_mappings = calc_cigars(filtered_mappings,
+                                    true_seq_fname,
+                                    contigs_fname,
+                                    read_length)
+    if plot:
+        plot_cigar(filtered_mappings,
+                   mutation_locations,
+                   read_length,
+                   true_seq_fname)
+    return mappings_to_metrics(filtered_mappings,
+                               mutation_locations,
+                               true_seq_fname)
+
+
+def filter_mappings(mappings: List[ContigMapping],
+                    true_seq_fname: str) -> List[ContigMapping]:
+    """Remove shorter, duplicated contigs."""
+    mappings = sorted(mappings, key=lambda x: x.end - x.start, reverse=True)
+    filtered_mappings = []
+    true_seq = load_fasta(true_seq_fname)[0]
+    uncovered_intvls = interval([0, true_seq.length - 2 * read_length])
+    for mapping in mappings:
+        mapped_intvl = interval([mapping.start, mapping.end])
+        if intvl_len(mapped_intvl & uncovered_intvls) > 1000:
+            filtered_mappings.append(mapping)
+            uncovered_intvls = subtract_intvl(uncovered_intvls, mapped_intvl)
+    return filtered_mappings
+
+
+def mappings_to_metrics(mappings: List[ContigMapping],
+                        mutation_locations: List[int],
+                        true_seq_fname: str,
+                        unit_length: int = 360) -> AssemblyMetrics:
+    n_ins_units, n_del_units = 0, 0
+    n_ins_bases, n_del_bases, n_sub_bases = 0, 0, 0
+    true_seq = load_fasta(true_seq_fname)[0]
+    uncovered_intvls = interval([0, true_seq.length - 2 * read_length])
+    for mapping in mappings:
+        mapped_intvl = interval([mapping.start, mapping.end])
+        uncovered_intvls = subtract_intvl(uncovered_intvls, mapped_intvl)
+        for l, op in mapping.cigar:
+            if op != '=':
+                if l >= 10:
+                    n_unit = -(-l // unit_length)
+                    if op == 'X':
+                        print("Unit-level Subs!")
+                    else:
+                        if op == 'I':
+                            n_ins_units += n_unit
+                        else:
+                            n_del_units += n_unit
+                else:
+                    if op == 'X':
+                        n_sub_bases += l
+                    elif op == 'I':
+                        n_ins_bases += l
+                    else:
+                        n_del_bases += l
+    n_missing_units = -(-intvl_len(uncovered_intvls) // unit_length)
+
+    mutation_locations = [pos - read_length for pos in mutation_locations]
+    # Check if the mutation is assembled for each mutation
+    mutation_status = {pos: None for pos in mutation_locations}
+    for mapping in mappings:
+        true_pos = mapping.start
+        for op in mapping.cigar.flatten():
+            if (true_pos in mutation_status
+                    and mutation_status[true_pos] in (None, '=')):
+                mutation_status[true_pos] = op
+            if op != 'I':
+                true_pos += 1
+    n_mis_mutations = len(list(filter(lambda x: x != '=',
+                                      mutation_status.values())))
+
+    return AssemblyMetrics(len(mappings),
+                           n_ins_units,
+                           n_del_units,
+                           n_missing_units,
+                           n_ins_bases,
+                           n_del_bases,
+                           n_sub_bases,
+                           n_mis_mutations,
+                           n_mis_mutations / len(mutation_locations))
 
 
 @ dataclass(frozen=True)
@@ -172,21 +288,6 @@ def find_contig_start_end(first_read_name: str,
             else (1, last_s, first_t))
 
 
-def _map_contigs(mappings: List[ContigMapping],
-                 true_fname: str,
-                 contigs_fname: str,
-                 mutation_locations: List[int],
-                 read_length: int):
-    mappings = calc_cigars(mappings,
-                           true_fname,
-                           contigs_fname,
-                           read_length)
-    plot_cigar(mappings,
-               mutation_locations,
-               read_length,
-               true_fname)
-
-
 def calc_cigars(mappings: List[ContigMapping],
                 true_fname: str,
                 contigs_fname: str,
@@ -247,8 +348,8 @@ def plot_cigar(mappings: List[ContigMapping],
             match_lines += _match_lines
             nonmatch_lines += _nonmatch_lines
         return ([make_lines(match_lines, width=line_width),
-                make_lines(nonmatch_lines, width=line_width, col="red"),
-                make_lines(gap_lines, width=line_width, col="yellow")],
+                 make_lines(nonmatch_lines, width=line_width, col="red"),
+                 make_lines(gap_lines, width=line_width, col="yellow")],
                 contig_start)
 
     def make_lines_for_contig(mapping: ContigMapping,
@@ -317,4 +418,5 @@ def plot_cigar(mappings: List[ContigMapping],
                           x_zeroline=False,
                           y_zeroline=False,
                           y_reversed=True,
-                          anchor_axes=True))
+                          anchor_axes=True,
+                          margin=dict(l=10, r=10, t=50, b=10)))
