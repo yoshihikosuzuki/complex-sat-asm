@@ -1,6 +1,7 @@
 # Added by user
 .vscode/
 work/
+consed*/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
