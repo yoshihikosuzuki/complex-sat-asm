@@ -333,6 +333,7 @@ def separate_cyclic_part(g: ig.Graph) -> List[ig.Graph]:
         vs_in_cycle.update(scc)
     return ig.Graph.DictList(edges=[e.attributes()
                                     for e in g.es
-                                    if (e["source"] in vs_in_cycle) == (e["target"] in vs_in_cycle)],
+                                    if ((e["source"] in vs_in_cycle)
+                                        == (e["target"] in vs_in_cycle))],
                              vertices=None,
                              directed=True).clusters(mode="weak").subgraphs()

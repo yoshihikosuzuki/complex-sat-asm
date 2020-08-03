@@ -98,7 +98,8 @@ def _calc_assembly_metrics(mappings: List[ContigMapping],
                            plot: bool) -> AssemblyMetrics:
     # Remove duplicated contigs
     filtered_mappings = filter_mappings(mappings,
-                                        true_seq_fname)
+                                        true_seq_fname,
+                                        read_length)
     # Compute alignments with affine gap penalty
     filtered_mappings = calc_cigars(filtered_mappings,
                                     true_seq_fname,
@@ -111,11 +112,13 @@ def _calc_assembly_metrics(mappings: List[ContigMapping],
                    true_seq_fname)
     return mappings_to_metrics(filtered_mappings,
                                mutation_locations,
-                               true_seq_fname)
+                               true_seq_fname,
+                               read_length)
 
 
 def filter_mappings(mappings: List[ContigMapping],
-                    true_seq_fname: str) -> List[ContigMapping]:
+                    true_seq_fname: str,
+                    read_length: int) -> List[ContigMapping]:
     """Remove shorter, duplicated contigs."""
     mappings = sorted(mappings, key=lambda x: x.end - x.start, reverse=True)
     filtered_mappings = []
@@ -132,6 +135,7 @@ def filter_mappings(mappings: List[ContigMapping],
 def mappings_to_metrics(mappings: List[ContigMapping],
                         mutation_locations: List[int],
                         true_seq_fname: str,
+                        read_length: int,
                         unit_length: int = 360) -> AssemblyMetrics:
     n_ins_units, n_del_units = 0, 0
     n_ins_bases, n_del_bases, n_sub_bases = 0, 0, 0

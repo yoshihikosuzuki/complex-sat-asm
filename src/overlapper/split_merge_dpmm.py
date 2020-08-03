@@ -22,6 +22,7 @@ class SplitMergeDpmmOverlapper:
       @ th_ward        : Distance threshold for initial clustering.
       @ alpha          : Concentration hyperparameter for DPMM.
       @ p_error        : Average sequencing error rate.
+      @ k_for_unit     : k-monomers are used for clustering.
       @ split_init_how : Specify how initial assignments of a split proposal
                          are decided.
                          Must be one of {"random", "nearest"}.
@@ -47,6 +48,7 @@ class SplitMergeDpmmOverlapper:
     th_ward: float = 0.01
     alpha: float = 1.
     p_error: float = 0.01
+    k_for_unit: int = 10
     split_init_how: str = "nearest"
     merge_how: str = "perfect"
     scheduler: Scheduler = Scheduler()
@@ -68,6 +70,7 @@ class SplitMergeDpmmOverlapper:
             shared_args=dict(th_ward=self.th_ward,
                              alpha=self.alpha,
                              p_error=self.p_error,
+                             k_for_unit=self.k_for_unit,
                              split_init_how=self.split_init_how,
                              merge_how=self.merge_how),
             scheduler=self.scheduler,
@@ -84,6 +87,7 @@ def run_smdc_multi(sync_reads: List[Tuple[int, List[TRRead]]],
                    th_ward: float,
                    alpha: float,
                    p_error: float,
+                   k_for_unit: int,
                    split_init_how: str,
                    merge_how: str,
                    n_core: int) -> List[Tuple[int, List[TRRead]]]:
@@ -94,6 +98,7 @@ def run_smdc_multi(sync_reads: List[Tuple[int, List[TRRead]]],
                                    th_ward,
                                    alpha,
                                    p_error,
+                                   k_for_unit,
                                    split_init_how,
                                    merge_how)
                                   for read_id, reads in sync_reads]))
@@ -104,20 +109,24 @@ def run_smdc(read_id: int,
              th_ward: float,
              alpha: float,
              p_error: float,
+             k_for_unit: int,
              split_init_how: str,
              merge_how: str,
              n_core: int = 1,
              plot: bool = False) -> Tuple[int, List[TRRead]]:
     assert all([read.synchronized for read in reads]), "Synchronize first"
-
-    units = [unit_seq for read in reads for unit_seq in read.unit_seqs]
-    quals = [qual for read in reads for qual in read.unit_quals]
+    # Collect all k-monomers in the reads
+    # TODO: XXX: properly treat insertions between units
+    units, quals = [], []
+    for read in reads:
+        units += [read.seq[read.units[i].start:read.units[i + k_for_unit - 1].end]
+                  for i in range(len(read.units) - k_for_unit + 1)]
+        quals += [read.qual[read.units[i].start:read.units[i + k_for_unit - 1].end]
+                  for i in range(len(read.units) - k_for_unit + 1)]
     smdc = ClusteringSeqSMD(units, quals, alpha, p_error)
-
     assert len(smdc.data) == len(smdc.quals)
     for i in range(smdc.N):
         assert len(smdc.data[i]) == len(smdc.quals[i])
-
     # Initial clustering
     smdc.calc_dist_mat(n_core=n_core)
     if plot:
@@ -125,11 +134,10 @@ def run_smdc(read_id: int,
     smdc.cluster_hierarchical(threshold=th_ward)
     logger.debug(f"Hierarchical clustering assignments:\n{smdc.assignments}")
     # TODO: remove single "outlier" units?
-    # (probably from regions covered only once by these reads right here)
+    # (probably from regions covered only once)
     smdc.gibbs_full()
     smdc.normalize_assignments()
     logger.debug(f"Assignments after full-scan Gibbs:\n{smdc.assignments}")
-
     # Perform split-merge samplings until convergence
     prev_p = f"{smdc.logp_clustering():.0f}"   # use str for -np.inf
     p_counts = Counter()   # for oscillation
@@ -163,15 +171,25 @@ def run_smdc(read_id: int,
     logger.debug(f"Finished read {read_id}")
 
     # Update representative units and assignments
+    # NOTE: k-monomers are assigned to each monomer as representative units
     er = EdlibRunner("global", revcomp=False)
     repr_units = {cluster_cons.cluster_id: cluster_cons.seq
                   for cluster_cons in smdc._generate_consensus()}
-    index = 0
     for read in reads:
         read.repr_units = repr_units
+        # Reset info on representative units since boundary (k-1) units should
+        # not have such info
         for unit in read.units:
+            unit.repr_id = None
+            unit.repr_aln = None
+    index = 0
+    for read in reads:
+        for i in range(len(read.units) - k_for_unit + 1):
+            k_unit_seq = read.seq[read.units[i].start:
+                                  read.units[i + k_for_unit - 1].end]
+            assert smdc.data[index] == k_unit_seq
+            unit = read.units[i]
             unit.repr_id = smdc.assignments[index]
-            unit.repr_aln = er.align(read.seq[unit.start:unit.end],
-                                     repr_units[unit.repr_id])
+            unit.repr_aln = er.align(k_unit_seq, repr_units[unit.repr_id])
             index += 1
     return read_id, reads

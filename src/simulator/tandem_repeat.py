@@ -1,4 +1,4 @@
-from typing import List
+from typing import Optional, List
 import random
 from BITS.seq.align import EdlibRunner
 from .rand_seq import gen_unique_seq
@@ -8,9 +8,13 @@ from .edit_script import EditWeightsType, insert_variants
 def gen_tandem_array(unit_length: int,
                      n_copy: int,
                      unit_mutate_profile: EditWeightsType,
-                     unit_mutate_by: str = "append") -> str:
+                     unit_mutate_by: str = "consensus",
+                     return_list: bool = False,
+                     rand_seed: Optional[int] = None) -> str:
     assert unit_mutate_by in ("append", "consensus"), \
         "`by` must be 'append' or 'consensus'"
+    if rand_seed is not None:
+        random.seed(rand_seed)
     if unit_mutate_by == "append":
         units = [gen_unique_seq(unit_length)]
         for _ in range(n_copy - 1):
@@ -23,7 +27,7 @@ def gen_tandem_array(unit_length: int,
                                  unit_mutate_profile,
                                  how="stochastic")
                  for _ in range(n_copy)]
-    return ''.join(units)
+    return units if return_list else ''.join(units)
 
 
 def calc_mutation_locations(true_genomes_fname: str,

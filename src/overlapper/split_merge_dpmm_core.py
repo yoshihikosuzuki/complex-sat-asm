@@ -66,18 +66,32 @@ class ClusteringSeqSMD(ClusteringSeq):
         # self._const_gibbs = -np.log10(self.N - 1 + self.alpha)
 
     def show(self):
+        # Compute a consensus sequence of all seqs to highlight variations
+        # among cluster consensus sequences
+        all_cons = consed.consensus(list(self.data),
+                                    seed_choice="median",
+                                    n_iter=3)
+        if all_cons == "":
+            logger.info("Use alt_consensus for all_cons")
+            all_cons = consensus_alt(list(self.data),
+                                     seed_choice="median")
         for cons in sorted(self._generate_consensus(),
                            key=lambda x: x.cluster_id):
-            print(f"Cluster {cons.cluster_id} "
+            print(f"### Cluster {cons.cluster_id} "
                   f"({cons.length} bp cons, {cons.cluster_size} seqs):")
+            aln = self.er.align(all_cons, cons.seq)
+            aln.show(a_name="master",
+                     b_name="cons",
+                     twist_plot=True)
+            print("===")
             seq_ids = self.cluster(cons.cluster_id, return_where=True)
             assert len(seq_ids) == cons.cluster_size
             for seq_id in seq_ids:
                 aln = self.er.align(cons.seq, self.data[seq_id])
-                print("---")
                 aln.show(a_name="cons",
                          b_name=f"seq{seq_id}",
                          twist_plot=True)
+                print("---")
 
     @property
     def cluster_ids(self) -> List[int]:
@@ -158,7 +172,7 @@ class ClusteringSeqSMD(ClusteringSeq):
              + self.n_clusters * np.log10(self.alpha)
              + np.sum([self._log_factorial[self.cluster_size(cluster_id) - 1]
                        for cluster_id in self.cluster_ids]))
-        #logger.debug(f"logp ewens = {p:.0f}")
+        # logger.debug(f"logp ewens = {p:.0f}")
         return p
 
     def _logp_cluster(self,
@@ -420,8 +434,12 @@ class ClusteringSeqSMD(ClusteringSeq):
             for x in self.cluster(old_cluster_id, return_where=True):
                 if x == data_i:
                     continue
-                dist_i = svs_dist(x, data_i)
-                dist_j = svs_dist(x, data_j)
+                # With cache
+                # dist_i = svs_dist(x, data_i)
+                # dist_j = svs_dist(x, data_j)
+                # Without cache
+                dist_i = self.er.align(self.data[x], self.data[data_i]).diff
+                dist_j = self.er.align(self.data[x], self.data[data_j]).diff
                 self.assignments[x] = (old_cluster_id if dist_i <= dist_j
                                        else new_cluster_id)
 
