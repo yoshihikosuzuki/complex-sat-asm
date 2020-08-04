@@ -1,8 +1,8 @@
 from dataclasses import dataclass
-from typing import List, Tuple, Dict, Set
+from typing import List, Tuple, Set
 from multiprocessing import Pool
 from logzero import logger
-from BITS.seq.align import EdlibAlignment, EdlibRunner
+from BITS.seq.align import EdlibRunner
 from BITS.util.io import load_pickle, save_pickle
 from BITS.util.proc import run_command
 from BITS.util.scheduler import Scheduler, run_distribute
@@ -58,15 +58,13 @@ def ava_sync(sync_reads: List[Tuple[int, List[TRRead]]],
              max_seq_diff: float,
              n_core: int) -> List[Overlap]:
     overlaps = set()
-    with Pool(n_core) as pool:
-        for ret in pool.starmap(_ava_sync,
-                                [(read_id,
+    for read_id, reads in sync_reads:
+        overlaps.update(_ava_sync(read_id,
                                   reads,
                                   min_n_units,
                                   max_units_diff,
-                                  max_seq_diff)
-                                 for read_id, reads in sync_reads]):
-            overlaps.update(ret)
+                                  max_seq_diff,
+                                  n_core))
     return sorted(overlaps)
 
 
@@ -74,38 +72,42 @@ def _ava_sync(read_id: int,
               reads: List[TRRead],
               min_n_units: int,
               max_units_diff: float,
-              max_seq_diff: float) -> Set[Overlap]:
+              max_seq_diff: float,
+              n_core: int) -> Set[Overlap]:
     # Precompute all-vs-all global alignments between the representative units
+    global repr_alignments
     logger.debug(f"Start {read_id} ({len(reads)} reads)")
     for i in range(len(reads) - 1):
         assert reads[i].repr_units == reads[i + 1].repr_units, \
             "Representative units of the reads must be same"
-    repr_units = reads[0].repr_units
     repr_alignments = {}
+    repr_units = reads[0].repr_units
     for id_i, seq_i in repr_units.items():
         for id_j, seq_j in repr_units.items():
             if id_i > id_j:
                 continue
-            repr_alignments[(id_i, id_j)] = repr_alignments[(id_j, id_i)] \
-                = er_global.align(seq_i, seq_j)
+            aln = er_global.align(seq_i, seq_j)
+            repr_alignments[(id_i, id_j)] = aln
+            repr_alignments[(id_j, id_i)] = aln
+    # Compute overlaps using the global alignments
     overlaps = set()
-    for read_i in reads:
-        for read_j in reads:
-            if read_i.id >= read_j.id:
-                continue
-            overlaps.update(svs_sync_reads(read_i,
-                                           read_j,
-                                           repr_alignments,
-                                           min_n_units=min_n_units,
-                                           max_units_diff=max_units_diff,
-                                           max_seq_diff=max_seq_diff))
+    with Pool(n_core) as pool:
+        for ret in pool.starmap(svs_sync_reads,
+                                [(read_i,
+                                  read_j,
+                                  min_n_units,
+                                  max_units_diff,
+                                  max_seq_diff)
+                                 for read_i in reads
+                                 for read_j in reads
+                                 if read_i.id < read_j.id]):
+            overlaps.update(ret)
     logger.debug(f"Read {read_id}: {len(overlaps)} overlaps")
     return overlaps
 
 
 def svs_sync_reads(a_read: TRRead,
                    b_read: TRRead,
-                   repr_alignments: Dict[Tuple[int, int], EdlibAlignment],
                    min_n_units: int,
                    max_units_diff: float,
                    max_seq_diff: float) -> Set[Overlap]:
