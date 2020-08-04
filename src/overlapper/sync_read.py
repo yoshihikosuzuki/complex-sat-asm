@@ -46,30 +46,9 @@ class ReadSynchronizer:
         run_command(f"mkdir -p {self.tmp_dname}; rm -f {self.tmp_dname}/*")
 
     def run(self):
-        overlaps = load_pickle(self.overlaps_fname)
-        read_ids = sorted(set([read_id
-                               for o in overlaps
-                               for read_id in (o.a_read_id, o.b_read_id)]))
-        # Merge reads that have the same set of overlapping reads
-        filtered_read_ids = []
-        added_read_id_set = set()
-        for read_id in read_ids:
-            read_id_set = {read_id}
-            for o in overlaps:
-                if o.a_read_id == read_id:
-                    read_id_set.add(o.b_read_id)
-                elif o.b_read_id == read_id:
-                    read_id_set.add(o.a_read_id)
-            read_id_set = tuple(sorted(read_id_set))
-            if read_id_set not in added_read_id_set:
-                filtered_read_ids.append(read_id)
-                added_read_id_set.add(read_id_set)
-        logger.info("Read IDs for synchronization: "
-                    f"{len(read_ids)} -> {len(filtered_read_ids)}")
-
         save_pickle(run_distribute(
             func=sync_reads,
-            args=filtered_read_ids,
+            args=self.filter_read_ids(),
             shared_args=dict(reads_fname=self.reads_fname,
                              overlaps_fname=self.overlaps_fname,
                              th_ward=self.th_ward,
@@ -82,6 +61,41 @@ class ReadSynchronizer:
             out_fname=self.out_fname,
             log_level="debug" if self.verbose else "info"),
             self.out_fname)
+
+    def filter_read_ids(self) -> List[int]:
+        overlaps = load_pickle(self.overlaps_fname)
+        n_ovlps_per_read = Counter()
+        for o in overlaps:
+            n_ovlps_per_read[o.a_read_id] += 1
+            n_ovlps_per_read[o.b_read_id] += 1
+        read_ids = set(n_ovlps_per_read.keys())
+        # NOTE: "90-90" rule for global mode
+        #       i.e. if >90% of reads involved in the overlaps overlap to
+        #       >90% of the reads, then run in a global mode.
+        if (len(list(filter(lambda c: c >= 0.9 * len(read_ids),
+                            list(n_ovlps_per_read.values()))))
+                >= 0.9 * len(read_ids)):   # global mode
+            # Pick up a single read that appears most frequently in overlaps
+            logger.info("Run in global mode")
+            return [n_ovlps_per_read.most_common()[0][0]]
+        else:   # local mode
+            # Merge reads that have the same set of overlapping reads
+            filtered_read_ids = []
+            added_read_id_set = set()
+            for read_id in sorted(read_ids):
+                read_id_set = {read_id}
+                for o in overlaps:
+                    if o.a_read_id == read_id:
+                        read_id_set.add(o.b_read_id)
+                    elif o.b_read_id == read_id:
+                        read_id_set.add(o.a_read_id)
+                read_id_set = tuple(sorted(read_id_set))
+                if read_id_set not in added_read_id_set:
+                    filtered_read_ids.append(read_id)
+                    added_read_id_set.add(read_id_set)
+            logger.info("Read IDs for synchronization: "
+                        f"{len(read_ids)} -> {len(filtered_read_ids)}")
+            return filtered_read_ids
 
 
 def sync_reads(read_ids: List[int],
