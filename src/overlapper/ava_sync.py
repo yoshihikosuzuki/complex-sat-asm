@@ -15,7 +15,7 @@ er_global = EdlibRunner("global", revcomp=False)
 @dataclass(eq=False)
 class SyncReadsOverlapper:
     sync_reads_fname: str
-    min_n_units: int = 3
+    k_for_unit: int = 30
     max_units_diff: float = 0.01
     max_seq_diff: float = 0.02
     scheduler: Scheduler = Scheduler()
@@ -39,7 +39,7 @@ class SyncReadsOverlapper:
         overlaps = run_distribute(
             func=ava_sync,
             args=sync_reads,
-            shared_args=dict(min_n_units=self.min_n_units,
+            shared_args=dict(k_for_unit=self.k_for_unit,
                              max_units_diff=self.max_units_diff,
                              max_seq_diff=self.max_seq_diff),
             scheduler=self.scheduler,
@@ -53,7 +53,7 @@ class SyncReadsOverlapper:
 
 
 def ava_sync(sync_reads: List[Tuple[int, List[TRRead]]],
-             min_n_units: int,
+             k_for_unit: int,
              max_units_diff: float,
              max_seq_diff: float,
              n_core: int) -> List[Overlap]:
@@ -61,7 +61,7 @@ def ava_sync(sync_reads: List[Tuple[int, List[TRRead]]],
     for read_id, reads in sync_reads:
         overlaps.update(_ava_sync(read_id,
                                   reads,
-                                  min_n_units,
+                                  k_for_unit,
                                   max_units_diff,
                                   max_seq_diff,
                                   n_core))
@@ -70,7 +70,7 @@ def ava_sync(sync_reads: List[Tuple[int, List[TRRead]]],
 
 def _ava_sync(read_id: int,
               reads: List[TRRead],
-              min_n_units: int,
+              k_for_unit: int,
               max_units_diff: float,
               max_seq_diff: float,
               n_core: int) -> Set[Overlap]:
@@ -95,7 +95,7 @@ def _ava_sync(read_id: int,
         for ret in pool.starmap(svs_sync_reads,
                                 [(read_i,
                                   read_j,
-                                  min_n_units,
+                                  k_for_unit,
                                   max_units_diff,
                                   max_seq_diff)
                                  for read_i in reads
@@ -108,24 +108,24 @@ def _ava_sync(read_id: int,
 
 def svs_sync_reads(a_read: TRRead,
                    b_read: TRRead,
-                   min_n_units: int,
+                   k_for_unit: int,
                    max_units_diff: float,
                    max_seq_diff: float) -> Set[Overlap]:
     """Overlap by sequence identity only on representative units.
     Sequence dovetail overlap including non-TR regions is done just for
     excluding overlaps with too different non-TR regions."""
     overlaps = set()
-    if min(len(a_read.units), len(b_read.units)) < min_n_units:
+    if min(len(a_read.units), len(b_read.units)) < k_for_unit:
         return overlaps
 
     # from  a ----->     to  a ----->
     #       b    ----->      b ----->
     b_start_unit = 0
-    for a_start_unit in range(len(a_read.units) - min_n_units + 1):
+    for a_start_unit in range(len(a_read.units) - k_for_unit + 1):
         alignments = [repr_alignments[(a_read.units[a_start_unit + i].repr_id,
                                        b_read.units[b_start_unit + i].repr_id)]
-                      for i in range(min(len(a_read.units) - a_start_unit,
-                                         len(b_read.units)))]
+                      for i in range(min(len(a_read.units) - a_start_unit - k_for_unit + 1,
+                                         len(b_read.units) - k_for_unit + 1))]
         diff = (sum([a.length * a.diff for a in alignments])
                 / sum([a.length for a in alignments]))
         if diff < max_units_diff:
@@ -149,12 +149,14 @@ def svs_sync_reads(a_read: TRRead,
 
     # from  a  ----->  to     a ----->
     #       b ----->      b ----->
+    if len(b_read.units) == k_for_unit:
+        return overlaps
     a_start_unit = 0
-    for b_start_unit in range(1, len(b_read.units) - min_n_units + 1):
+    for b_start_unit in range(1, len(b_read.units) - k_for_unit + 1):
         alignments = [repr_alignments[(a_read.units[a_start_unit + i].repr_id,
                                        b_read.units[b_start_unit + i].repr_id)]
-                      for i in range(min(len(b_read.units) - b_start_unit,
-                                         len(a_read.units)))]
+                      for i in range(min(len(b_read.units) - b_start_unit - k_for_unit + 1,
+                                         len(a_read.units) - k_for_unit + 1))]
         diff = (sum([a.length * a.diff for a in alignments])
                 / sum([a.length for a in alignments]))
         if diff < max_units_diff:
