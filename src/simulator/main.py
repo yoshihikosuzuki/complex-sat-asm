@@ -1,10 +1,11 @@
 from os.path import join
 from dataclasses import dataclass, field
-from typing import ClassVar, List
+from typing import ClassVar, Type, List
 import random
 from logzero import logger
 from BITS.seq.io import FastaRecord, save_fasta
 from BITS.seq.util import revcomp_seq
+from BITS.util.io import save_pickle
 from BITS.util.proc import run_command
 from .rand_seq import gen_unique_seq
 from .edit_script import EditWeightsType, insert_variants
@@ -37,10 +38,11 @@ class Simulator:
     read_depth: int
     read_error_profile: EditWeightsType
     out_dname: str = "sim"
+    out_fname: str = "simulator.pkl"
     out_genomes_fname: str = "true_genomes.fasta"
     out_reads_fname: str = "sim_reads.fasta"
     rand_seed: int = 0
-    genomes: List[FastaRecord] = field(default_factory=list)
+    genomes: List[Type[FastaRecord]] = field(default_factory=list)
     reads: List[FastaRecord] = field(init=False, default_factory=list)
     generated: ClassVar[bool] = False
 
@@ -48,7 +50,7 @@ class Simulator:
         random.seed(self.rand_seed)
         run_command(f"mkdir -p {self.out_dname}; rm -rf {self.out_dname}/*")
 
-    def add_genome(self, genome: FastaRecord):
+    def add_genome(self, genome: Type[FastaRecord]):
         self.genomes.append(genome)
 
     def run(self):
@@ -70,14 +72,17 @@ class Simulator:
         # Save genomes and reads
         out_genomes_fname = join(self.out_dname, self.out_genomes_fname)
         out_reads_fname = join(self.out_dname, self.out_reads_fname)
+        out_fname = join(self.out_dname, self.out_fname)
         save_fasta(self.genomes, out_genomes_fname)
         save_fasta(self.reads, out_reads_fname)
-        logger.info('\n'.join(["Output to:",
-                               f"{out_genomes_fname} (Genomes)",
-                               f"{out_reads_fname} (Reads)"]))
+        save_pickle(self, out_fname)
+        logger.info("Output to:\n"
+                    f"{out_genomes_fname} (Genomes)\n"
+                    f"{out_reads_fname} (Reads)\n"
+                    f"{out_fname} (Simulator object)")
 
 
-def sample_read(genome: FastaRecord,
+def sample_read(genome: Type[FastaRecord],
                 read_length: int,
                 error_profile: EditWeightsType,
                 index: int) -> FastaRecord:
@@ -85,10 +90,10 @@ def sample_read(genome: FastaRecord,
     strand = random.randint(0, 1)
     if strand == 0:
         start, end = pos, min(pos + read_length, genome.length)
-        seq = genome.seq[start:end]
+        seq = genome.seq[start: end]
     else:
         start, end = max(pos - read_length, 0), pos
-        seq = revcomp_seq(genome.seq[start:end])
+        seq = revcomp_seq(genome.seq[start: end])
     return FastaRecord(seq=insert_variants(seq, error_profile, how="stochastic"),
                        name=' '.join([f"sim/{index}/0_{len(seq)}",
                                       f"genome={genome.name}",
@@ -97,7 +102,7 @@ def sample_read(genome: FastaRecord,
                                       f"strand={strand}"]))
 
 
-def sample_reads(genome: FastaRecord,
+def sample_reads(genome: Type[FastaRecord],
                  depth: int,
                  read_length: int,
                  error_profile: EditWeightsType) -> List[FastaRecord]:

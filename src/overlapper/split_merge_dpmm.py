@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from typing import List, Tuple
 from collections import Counter
 import random
+import numpy as np
+from scipy.spatial.distance import squareform
 from logzero import logger
 from BITS.seq.align import EdlibRunner
 from BITS.util.io import save_pickle, load_pickle
@@ -114,6 +116,41 @@ def run_smdc(read_id: int,
              merge_how: str,
              n_core: int = 1,
              plot: bool = False) -> Tuple[int, List[TRRead]]:
+    def handle_isolated_units(smdc: ClusteringSeqSMD) -> ClusteringSeqSMD:
+        indices_isolated = []
+        for i in range(smdc.N):
+            if np.min(np.concatenate([smdc.s_dist_mat[i][:i],
+                                      smdc.s_dist_mat[i][i + 1:]])) > 0.03:
+                indices_isolated.append(i)
+        logger.info(f"Read {read_id}: {len(indices_isolated)} isolated units")
+        units, quals = list(smdc.data), list(smdc.quals)
+        for i in indices_isolated:
+            units.append(smdc.data[i])
+            quals.append(smdc.quals[i])
+        # Recompute variables
+        new_smdc = ClusteringSeqSMD(units, quals, alpha, p_error)
+        new_smdc.s_dist_mat = np.zeros((new_smdc.N, new_smdc.N),
+                                       dtype="float32")
+        for i in range(smdc.N):
+            for j in range(smdc.N):
+                new_smdc.s_dist_mat[i][j] = smdc.s_dist_mat[i][j]
+        for i, index in enumerate(indices_isolated):
+            for j in range(smdc.N):
+                new_smdc.s_dist_mat[smdc.N + i][j] = \
+                    new_smdc.s_dist_mat[j][smdc.N + i] = \
+                    smdc.s_dist_mat[index][j]
+        er = EdlibRunner("global", revcomp=False)
+        for i in range(len(indices_isolated)):
+            for j in range(len(indices_isolated)):
+                if i >= j:
+                    continue
+                new_smdc.s_dist_mat[smdc.N + i][smdc.N + j] = \
+                    new_smdc.s_dist_mat[smdc.N + j][smdc.N + i] = \
+                    er.align(new_smdc.data[smdc.N + i],
+                             new_smdc.data[smdc.N + j]).diff
+        new_smdc.c_dist_mat = squareform(new_smdc.s_dist_mat)
+        return new_smdc
+
     assert all([read.synchronized for read in reads]), "Synchronize first"
     # Collect all k-monomers in the reads
     # TODO: XXX: properly treat insertions between units
@@ -131,6 +168,12 @@ def run_smdc(read_id: int,
     smdc.calc_dist_mat(n_core=n_core)
     if plot:
         smdc.show_dendrogram()
+    # NOTE: for each isolated unit, add "fake duplicate" so that the original
+    #       unit and the fake duplicate form a single cluster and will not
+    #       affect the other units. After the clustering, fake duplicates will
+    #       not be pulled back to reads, and thus each isolated unit should
+    #       belong to an isolated cluster.
+    smdc = handle_isolated_units(smdc)
     smdc.cluster_hierarchical(threshold=th_ward)
     logger.debug(f"Hierarchical clustering assignments:\n{smdc.assignments}")
     # TODO: remove single "outlier" units?

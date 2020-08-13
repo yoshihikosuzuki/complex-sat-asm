@@ -16,6 +16,7 @@ class DatanderRunner:
 
     positional arguments:
       @ db_prefix : Prefix of the DAZZ_DB file.
+      @ db_suffix : Specify DB or DAM.
 
     optional arguments:
       @ n_core    : Number of cores used for datader.
@@ -23,18 +24,21 @@ class DatanderRunner:
       @ tmp_dir   : Relative path to a directory for intermediate files.
     """
     db_prefix: str
+    db_suffix: str = "db"
     scheduler: Optional[Scheduler] = None
     n_core: int = 1
     tmp_dir: str = "datander"
 
     def __post_init__(self):
-        run_command(f"rm -f .{self.db_prefix}.*.tan.* .{self.db_prefix}.tan.* TAN.*")
+        run_command(f"rm -f .{self.db_prefix}.*.tan.* "
+                    f".{self.db_prefix}.tan.* TAN.*")
         run_command(f"mkdir -p {self.tmp_dir}; rm -f {self.tmp_dir}/*")
 
     def run(self):
         # Run `HPC.TANmask` to generate scripts to be executed
-        script = run_command(f"HPC.TANmask -T{self.n_core} {self.db_prefix}.db")
-        if db_to_n_blocks(f"{self.db_prefix}.db") > 1:
+        script = run_command(f"HPC.TANmask -T{self.n_core} "
+                             f"{self.db_prefix}.{self.db_suffix}")
+        if db_to_n_blocks(f"{self.db_prefix}.{self.db_suffix}") > 1:
             script += '\n'.join([f"Catrack -v {self.db_prefix} tan",
                                  f"rm .{self.db_prefix}.*.tan.*"])
 

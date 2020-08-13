@@ -1,0 +1,58 @@
+# Config file in TOML format (https://github.com/toml-lang/toml)
+
+[job_scheduler]
+use_scheduler = true
+
+    [job_scheduler.args]
+    scheduler_name = "sge"
+    submit_command = "qsub"
+    #queue_name = "all.q"
+    #prefix_command = "source /path/to/venv/bin/activate; ulimit -c 0"
+
+[extract]
+db_prefix = "READS"
+has_fastq = true
+fastq_fname = "reads.fastq"
+#mean_qv = 20
+
+    [extract.tr_detection]
+    n_core = 8
+
+    [extract.unit_detection]
+    n_core = 8
+    n_distribute = 4
+
+[filter]
+min_n_units = 10
+min_ulen = 320
+max_ulen = 380
+n_core = 8
+filtered_reads_fname = "filtered_reads.pkl"
+
+[assemble]
+reads_fname = "filtered_reads.pkl"
+
+    [assemble.unsync_overlap]
+    global = false
+    n_core = 10
+    n_distribute = 10
+    unsync_ovlps_fname = "unsync_overlaps.pkl"
+
+    [assemble.unit_sync]
+    n_core = 10
+    n_distribute = 10
+    sync_reads_fname = "sync_reads.pkl"
+
+    [assemble.unit_clustering]
+    n_core = 10
+    n_distribute = 10
+    smdc_reads_fname = "smdc_reads.pkl"
+
+    [assemble.sync_overlap]
+    n_core = 10
+    n_distribute = 10
+    smdc_ovlps_fname = "sync_overlaps.pkl"
+
+    [assemble.layout]
+    n_core = 10
+    contigs_fname = "contigs.fasta"
