@@ -1,6 +1,23 @@
 from typing import Optional, List, Tuple
 from logzero import logger
+from BITS.util.io import load_pickle, save_pickle
 from ..type import TRRead
+
+
+def filter_reads(reads_fname: str,
+                 min_n_units: int,
+                 min_ulen: int,
+                 max_ulen: int,
+                 out_fname: str = "filtered_reads.pkl"):
+    reads = load_pickle(reads_fname)
+    filtered_reads = filter_by_unit(reads,
+                                    min_cov=min_n_units,
+                                    how="count",
+                                    ulen_range=(min_ulen, max_ulen))
+    for read in filtered_reads:
+        read.units = list(filter(lambda unit: min_ulen <= unit.length <= max_ulen,
+                                 read.units))
+    save_pickle(filtered_reads, out_fname)
 
 
 def filter_by_tr(reads: List[TRRead],
@@ -22,12 +39,12 @@ def filter_by_tr(reads: List[TRRead],
 
 def filter_by_unit(reads: List[TRRead],
                    min_cov: int,
-                   how: str = "length",
+                   how: str = "count",
                    ulen_range: Optional[Tuple[int, int]] = None) -> List[TRRead]:
     """Filter TR reads based on coverage by TR units.
 
     positinal arguments:
-      @ reads   : TR reads.
+      @ reads   : TR reads or file name of TR reads.
       @ min_cov : Threshold of coverage value.
 
     optional arguments:

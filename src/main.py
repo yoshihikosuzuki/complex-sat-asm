@@ -1,11 +1,13 @@
 from typing import Dict
 import argparse
 import toml
+from BITS.seq.io import fasta_to_db
 from BITS.util.scheduler import Scheduler
 from .datander import DatanderRunner
 from .datruf import (DatrufRunner,
-                     filter_by_tr,
-                     filter_by_unit)
+                     load_qv,
+                     filter_reads)
+"""
 from .overlapper import (UnsyncReadsOverlapper,
                          ReadSynchronizer,
                          SplitMergeDpmmOverlapper,
@@ -13,6 +15,7 @@ from .overlapper import (UnsyncReadsOverlapper,
 from .layouter import (overlaps_to_graph,
                        reduce_graph,
                        graphs_to_contigs)
+"""
 
 
 def main():
@@ -21,6 +24,10 @@ def main():
                  if config["job_scheduler"]["use_scheduler"]
                  else None)
     if config["task"] in ("extract", "all"):
+        if config["extract"]["from_fasta"]:
+            fasta_to_db(db_prefix=config["extract"]["db_prefix"],
+                        db_type="db",
+                        **config["extract"]["fasta_to_db"])
         # Detect tandem repeats
         DatanderRunner(db_prefix=config["extract"]["db_prefix"],
                        scheduler=scheduler,
@@ -28,12 +35,19 @@ def main():
         # Detect tandem repeat units
         DatrufRunner(db_fname=f"{config['extract']['db_prefix']}.db",
                      las_fname=f"TAN.{config['extract']['db_prefix']}.las",
-                     # TODO: pass arguments for loading QV
                      scheduler=scheduler,
+                     out_fname=config["extract"]["tr_reads_fname"],
+                     verbose=config["verbose"],
                      **config["extract"]["unit_detection"]).run()
+        # Load QV data
+        load_qv(reads_fname=config["extract"]["tr_reads_fname"],
+                **config["extract"]["load_qv"])
+        # TODO: Visualize unit length distribution (output an html file?)
     if config["task"] in ("filter", "all"):
         # Filter reads having units you want to assemble
-        pass
+        filter_reads(reads_fname=config["extract"]["tr_reads_fname"],
+                     out_fname=config["filter"]["filtered_reads_fname"],
+                     **config["filter"]["args"])
     if config["task"] in ("assemble", "all"):
         pass
 

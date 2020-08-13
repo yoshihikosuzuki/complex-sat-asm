@@ -1,2 +1,3 @@
 from .main import DatrufRunner
-from .filter_reads import filter_by_tr, filter_by_unit
+from .filter import filter_reads, filter_by_tr, filter_by_unit
+from .qv import load_qv

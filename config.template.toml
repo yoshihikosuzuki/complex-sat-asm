@@ -1,5 +1,7 @@
 # Config file in TOML format (https://github.com/toml-lang/toml)
 
+verbose = true
+
 [job_scheduler]
 use_scheduler = true
 
@@ -10,24 +12,34 @@ use_scheduler = true
     #prefix_command = "source /path/to/venv/bin/activate; ulimit -c 0"
 
 [extract]
+from_fasta = true
 db_prefix = "READS"
-has_fastq = true
-fastq_fname = "reads.fastq"
-#mean_qv = 20
+tr_reads_fname = "tr_reads.pkl"
+
+    [extract.fasta_to_db]
+    fasta_fname = "reads.fasta"
+    db_block_size = 500
 
     [extract.tr_detection]
     n_core = 8
 
     [extract.unit_detection]
-    n_core = 8
-    n_distribute = 4
+    n_core = 10
+    n_distribute = 5
+    max_cv = 0.1
+    max_slope_dev = 0.05
+
+    [extract.load_qv]
+    fastq_fname = "reads.fastq"
+    #mean_qv = 20
 
 [filter]
-min_n_units = 10
-min_ulen = 320
-max_ulen = 380
-n_core = 8
 filtered_reads_fname = "filtered_reads.pkl"
+
+    [filter.args]
+    min_n_units = 10
+    min_ulen = 320
+    max_ulen = 380
 
 [assemble]
 reads_fname = "filtered_reads.pkl"
