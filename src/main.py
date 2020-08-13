@@ -36,18 +36,17 @@ def main():
         DatrufRunner(db_fname=f"{config['extract']['db_prefix']}.db",
                      las_fname=f"TAN.{config['extract']['db_prefix']}.las",
                      scheduler=scheduler,
-                     out_fname=config["extract"]["tr_reads_fname"],
+                     out_fname=config["extract"]["out_fname"],
                      verbose=config["verbose"],
                      **config["extract"]["unit_detection"]).run()
         # Load QV data
-        load_qv(reads_fname=config["extract"]["tr_reads_fname"],
+        load_qv(reads_fname=config["extract"]["out_fname"],
                 **config["extract"]["load_qv"])
         # TODO: Visualize unit length distribution (output an html file?)
     if config["task"] in ("filter", "all"):
         # Filter reads having units you want to assemble
-        filter_reads(reads_fname=config["extract"]["tr_reads_fname"],
-                     out_fname=config["filter"]["filtered_reads_fname"],
-                     **config["filter"]["args"])
+        filter_reads(reads_fname=config["extract"]["out_fname"],
+                     **config["filter"])
     if config["task"] in ("assemble", "all"):
         pass
 

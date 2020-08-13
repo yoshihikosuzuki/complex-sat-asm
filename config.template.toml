@@ -8,13 +8,13 @@ use_scheduler = true
     [job_scheduler.args]
     scheduler_name = "sge"
     submit_command = "qsub"
-    #queue_name = "all.q"
-    #prefix_command = "source /path/to/venv/bin/activate; ulimit -c 0"
+    queue_name = "all.q"
+    prefix_command = "source ~/.bashrc; source /path/to/venv/bin/activate; ulimit -c 0"
 
 [extract]
 from_fasta = true
 db_prefix = "READS"
-tr_reads_fname = "tr_reads.pkl"
+out_fname = "tr_reads.pkl"
 
     [extract.fasta_to_db]
     fasta_fname = "reads.fasta"
@@ -34,12 +34,10 @@ tr_reads_fname = "tr_reads.pkl"
     #mean_qv = 20
 
 [filter]
-filtered_reads_fname = "filtered_reads.pkl"
-
-    [filter.args]
-    min_n_units = 10
-    min_ulen = 320
-    max_ulen = 380
+min_n_units = 10
+min_ulen = 320
+max_ulen = 380
+out_fname = "filtered_reads.pkl"
 
 [assemble]
 reads_fname = "filtered_reads.pkl"
