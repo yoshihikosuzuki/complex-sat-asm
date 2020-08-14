@@ -1,8 +1,8 @@
 # Complex Satellite Sequence Assembly
 
-Complex satellites are tandem repeats with a large (e.g. >100 bp) unit size and a some sequence diversity among units.
+Complex satellites are tandem repeats with a large (e.g. >100 bp) unit size and some sequence diversity among units.
 
-Our objective is a _de novo_ assembler for any type of complex satellite.
+Our objective is a _de novo_ assembler for any type of complex satellites.
 
 Current implementaion supports only:
 
