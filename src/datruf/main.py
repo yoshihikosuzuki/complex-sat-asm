@@ -69,7 +69,7 @@ class DatrufRunner:
         n_unit = -(-self.n_reads // n_split)
         dbid_ranges = [(1 + i * n_unit,
                         min([1 + (i + 1) * n_unit - 1, self.n_reads]))
-                       for i in range(n_split)]
+                       for i in range(-(-self.n_reads // n_unit))]
         logger.debug(f"(start_dbid, end_dbid)={dbid_ranges}")
         return run_distribute(
             func=find_units_multi,
