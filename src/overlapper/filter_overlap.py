@@ -3,6 +3,7 @@ from collections import defaultdict
 from statistics import mean, stdev
 from logzero import logger
 from BITS.plot.plotly import make_hist, make_layout, show_plot
+from BITS.util.io import load_pickle, save_pickle
 from BITS.util.union_find import UnionFind
 from ..type import Overlap
 
@@ -39,6 +40,54 @@ def reduce_same_overlaps(overlaps: List[Overlap],
         reduced_overlaps += list(ovlps_by_pos.values())
     logger.info(f"{len(overlaps)} -> {len(reduced_overlaps)} overlaps")
     return reduced_overlaps
+
+
+def filter_unsync(overlaps_fname: str,
+                  min_n_ovlp: int,
+                  default_min_ovlp_len: int,
+                  limit_min_ovlp_len: int,
+                  contained_removal: bool,
+                  out_fname: str):
+    overlaps = load_pickle(overlaps_fname)
+    # Remove short and/or noisy overlaps while keeping overlaps around putative
+    # low coverage regions
+    filtered_overlaps = adaptive_filter_overlaps(overlaps,
+                                                 min_n_ovlp,
+                                                 default_min_ovlp_len,
+                                                 limit_min_ovlp_len,
+                                                 contained_removal)
+    # TODO: by="length" works for simulation datasets?
+    filtered_overlaps = best_overlaps_per_pair(filtered_overlaps,
+                                               by="length")
+    # NOTE: By removing contained reads, you can save much time in overlap
+    #       computation, although accuracy might decrease.
+    if contained_removal:
+        filtered_overlaps = remove_contained_reads(filtered_overlaps)
+    save_pickle(filtered_overlaps, out_fname)
+
+
+def filter_sync(overlaps_fname: str,
+                max_diff: float,
+                min_n_ovlp: int,
+                default_min_ovlp_len: int,
+                limit_min_ovlp_len: int,
+                out_fname: str):
+    overlaps = load_pickle(overlaps_fname)
+    # Find the longest overlap per read pair after removing noisy overlaps
+    filtered_overlaps = filter_overlaps(overlaps,
+                                        max_diff,
+                                        min_ovlp_len=0)
+    # TODO: by="length" works for simulation datasets?
+    filtered_overlaps = best_overlaps_per_pair(filtered_overlaps,
+                                               by="length")
+    # Use adaptive filtering for removing short overlaps while keeping overlaps
+    # around low coverage regions
+    filtered_overlaps = adaptive_filter_overlaps(filtered_overlaps,
+                                                 min_n_ovlp,
+                                                 default_min_ovlp_len,
+                                                 limit_min_ovlp_len,
+                                                 filter_by_diff=False)
+    save_pickle(filtered_overlaps, out_fname)
 
 
 def filter_overlaps(overlaps: List[Overlap],
@@ -114,8 +163,7 @@ def adaptive_filter_overlaps(overlaps: List[Overlap],
                           default_min_ovlp_len),
                       limit_min_ovlp_len)
         min_lens.append(min_len)
-        return list(filter(lambda o: o.length >= min_len,
-                           _overlaps))
+        return list(filter(lambda o: o.length >= min_len, _overlaps)),
 
     overlaps_per_read = defaultdict(list)
     for o in overlaps:

@@ -24,7 +24,6 @@ class SplitMergeDpmmOverlapper:
       @ th_ward        : Distance threshold for initial clustering.
       @ alpha          : Concentration hyperparameter for DPMM.
       @ p_error        : Average sequencing error rate.
-      @ k_for_unit     : k-monomers are used for clustering.
       @ split_init_how : Specify how initial assignments of a split proposal
                          are decided.
                          Must be one of {"random", "nearest"}.
@@ -50,7 +49,6 @@ class SplitMergeDpmmOverlapper:
     th_ward: float = 0.01
     alpha: float = 1.
     p_error: float = 0.01
-    k_for_unit: int = 10
     split_init_how: str = "nearest"
     merge_how: str = "perfect"
     scheduler: Scheduler = Scheduler()

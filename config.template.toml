@@ -59,15 +59,11 @@ reads_fname = "filtered_reads.pkl"
     tmp_dname = "unsync_ovlp"
 
     [assemble.unsync_filter]
-    best_overlap_by = "diff"
+    min_n_ovlp = 5
+    default_min_ovlp_len = 10000
+    limit_min_ovlp_len = 0
     contained_removal = false
     out_fname = "unsync_filtered_overlaps.pkl"
-
-        [assemble.unsync_filter.adaptive_args]
-        min_n_ovlp = 5
-        default_min_ovlp_len = 10000
-        limit_min_ovlp_len = 0
-        filter_by_diff = true   # remove if real dataset doesn't require contained overlap removal anymore
 
     [assemble.unit_sync]
     th_ward = 0.15
@@ -81,7 +77,6 @@ reads_fname = "filtered_reads.pkl"
     th_ward = 0.01
     alpha = 1.0
     p_error = 0.01
-    k_for_unit = 10
     split_init_how = "nearest"
     merge_how = "perfect"
     n_core = 10
@@ -91,7 +86,6 @@ reads_fname = "filtered_reads.pkl"
     rand_seed = 0
 
     [assemble.sync_overlap]
-    k_for_unit = 10
     max_units_diff = 0.01
     max_seq_diff = 0.02
     n_core = 10
@@ -101,14 +95,10 @@ reads_fname = "filtered_reads.pkl"
 
     [assemble.sync_filter]
     max_diff = 0.001
-    min_ovlp_len = 6000
-    best_overlap_by = "diff"
+    min_n_ovlp = 2
+    default_min_ovlp_len = 10000
+    limit_min_ovlp_len = 6000
     out_fname = "sync_filtered_overlaps.pkl"
-
-        [assemble.sync_filter.adaptive_args]
-        min_n_ovlp = 2
-        default_min_ovlp_len = 10000
-        limit_min_ovlp_len = 6000
 
     [assemble.layout]
     n_core = 10

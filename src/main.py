@@ -2,7 +2,6 @@ from typing import Dict
 import argparse
 import toml
 from BITS.seq.io import fasta_to_db, save_fasta
-from BITS.util.io import load_pickle, save_pickle
 from BITS.util.scheduler import Scheduler
 from .datander import DatanderRunner
 from .datruf import (DatrufRunner,
@@ -12,10 +11,8 @@ from .overlapper import (UnsyncReadsOverlapper,
                          ReadSynchronizer,
                          SplitMergeDpmmOverlapper,
                          SyncReadsOverlapper,
-                         filter_overlaps,
-                         best_overlaps_per_pair,
-                         remove_contained_reads,
-                         adaptive_filter_overlaps)
+                         filter_unsync,
+                         filter_sync)
 """
 from .layouter.graph import (overlaps_to_string_graph,
                              reduce_graph)
@@ -84,18 +81,8 @@ def main():
                               **config["assemble"]["unsync_overlap"]).run()
     if "filter_unsync" in tasks:
         # Adaptively filter unsynchronized overlaps
-        overlaps = load_pickle(
-            config["assemble"]["unsync_overlap"]["out_fname"])
-        filtered_overlaps = adaptive_filter_overlaps(
-            overlaps=overlaps,
-            **config["assemble"]["unsync_filter"]["adaptive_args"])
-        filtered_overlaps = best_overlaps_per_pair(
-            filtered_overlaps,
-            by=config["assemble"]["unsync_filter"]["best_overlap_by"])
-        if config["assemble"]["unsync_filter"]["contained_removal"]:
-            filtered_overlaps = remove_contained_reads(filtered_overlaps)
-        save_pickle(filtered_overlaps,
-                    config["assemble"]["unsync_filter"]["out_fname"])
+        filter_unsync(overlaps_fname=config["assemble"]["unsync_overlap"]["out_fname"],
+                      **config["assemble"]["unsync_filter"])
     if "sync" in tasks:
         # Syncronize TR reads
         ReadSynchronizer(
@@ -120,20 +107,8 @@ def main():
             **config["assemble"]["sync_overlap"]).run()
     if "filter_sync" in tasks:
         # Adaptively filter synchronized overlaps
-        overlaps = load_pickle(config["assemble"]["sync_overlap"]["out_fname"])
-        filtered_overlaps = filter_overlaps(
-            overlaps,
-            max_diff=config["assemble"]["sync_filter"]["max_diff"],
-            min_ovlp_len=config["assemble"]["sync_filter"]["min_ovlp_len"])
-        filtered_overlaps = best_overlaps_per_pair(
-            filtered_overlaps,
-            by=config["assemble"]["sync_filter"]["best_overlap_by"])
-        filtered_overlaps = adaptive_filter_overlaps(
-            overlaps=filtered_overlaps,
-            filter_by_diff=False,
-            **config["assemble"]["sync_filter"]["adaptive_args"])
-        save_pickle(filtered_overlaps,
-                    config["assemble"]["sync_filter"]["out_fname"])
+        filter_sync(overlaps_fname=config["assemble"]["sync_overlap"]["out_fname"],
+                    **config["assemble"]["sync_filter"])
     """
     if "contig" in tasks:
         # Construct a string graph
