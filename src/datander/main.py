@@ -21,18 +21,18 @@ class DatanderRunner:
     optional arguments:
       @ n_core    : Number of cores used for datader.
       @ scheduler : `BITS.util.scheduler.Scheduler` object.
-      @ tmp_dir   : Relative path to a directory for intermediate files.
+      @ tmp_dname : Relative path to a directory for intermediate files.
     """
     db_prefix: str
     db_suffix: str = "db"
     scheduler: Optional[Scheduler] = None
     n_core: int = 1
-    tmp_dir: str = "datander"
+    tmp_dname: str = "datander"
 
     def __post_init__(self):
         run_command(f"rm -f .{self.db_prefix}.*.tan.* "
                     f".{self.db_prefix}.tan.* TAN.*")
-        run_command(f"mkdir -p {self.tmp_dir}; rm -f {self.tmp_dir}/*")
+        run_command(f"mkdir -p {self.tmp_dname}; rm -f {self.tmp_dname}/*")
 
     def run(self):
         # Run `HPC.TANmask` to generate scripts to be executed
@@ -43,8 +43,8 @@ class DatanderRunner:
                                  f"rm .{self.db_prefix}.*.tan.*"])
 
         # Run the script
-        script_fname = join(self.tmp_dir, "run_datander.sh")
-        log_fname = join(self.tmp_dir, "log")
+        script_fname = join(self.tmp_dname, "run_datander.sh")
+        log_fname = join(self.tmp_dname, "log")
         if self.scheduler is None:
             with open(script_fname, 'w') as f:
                 f.write(f"{script}\n")

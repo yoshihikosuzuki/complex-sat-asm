@@ -7,6 +7,7 @@ from BITS.util.io import load_pickle, save_pickle
 from BITS.util.proc import run_command
 from BITS.util.scheduler import Scheduler, run_distribute
 from .align_proper import proper_alignment
+from .filter_overlap import reduce_same_overlaps
 from ..type import TRRead, Overlap
 
 er_global = EdlibRunner("global", revcomp=False)
@@ -49,7 +50,8 @@ class SyncReadsOverlapper:
             job_name="ava_sync",
             out_fname=self.out_fname,
             log_level="debug" if self.verbose else "info")
-        save_pickle(sorted(set(overlaps)), self.out_fname)
+        save_pickle(sorted(reduce_same_overlaps(list(set(overlaps)))),
+                    self.out_fname)
 
 
 def ava_sync(sync_reads: List[Tuple[int, List[TRRead]]],

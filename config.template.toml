@@ -14,7 +14,7 @@ use_scheduler = true
 [extract]
 from_fasta = true
 db_prefix = "READS"
-out_fname = "tr_reads.pkl"
+db_suffix = "db"
 
     [extract.fasta_to_db]
     fasta_fname = "reads.fasta"
@@ -22,12 +22,15 @@ out_fname = "tr_reads.pkl"
 
     [extract.tr_detection]
     n_core = 8
+    tmp_dname = "datander"
 
     [extract.unit_detection]
     n_core = 10
     n_distribute = 5
     max_cv = 0.1
     max_slope_dev = 0.05
+    out_fname = "tr_reads.pkl"
+    tmp_dname = "datruf"
 
     [extract.load_qv]
     fastq_fname = "reads.fastq"
@@ -44,25 +47,69 @@ reads_fname = "filtered_reads.pkl"
 
     [assemble.unsync_overlap]
     global = false
+    unit_offset = 1
+    k_unit = 2
+    k_spectrum = 13
+    min_kmer_ovlp = 0.4
+    max_init_diff = 0.02
+    max_diff = 0.02
     n_core = 10
     n_distribute = 10
-    unsync_ovlps_fname = "unsync_overlaps.pkl"
+    out_fname = "unsync_overlaps.pkl"
+    tmp_dname = "unsync_ovlp"
+
+    [assemble.unsync_filter]
+    best_overlap_by = "diff"
+    contained_removal = false
+    out_fname = "unsync_filtered_overlaps.pkl"
+
+        [assemble.unsync_filter.adaptive_args]
+        min_n_ovlp = 5
+        default_min_ovlp_len = 10000
+        limit_min_ovlp_len = 0
+        filter_by_diff = true   # remove if real dataset doesn't require contained overlap removal anymore
 
     [assemble.unit_sync]
+    th_ward = 0.15
+    th_map = 0.1
     n_core = 10
     n_distribute = 10
-    sync_reads_fname = "sync_reads.pkl"
+    out_fname = "sync_reads.pkl"
+    tmp_dname = "sync_reads"
 
     [assemble.unit_clustering]
+    th_ward = 0.01
+    alpha = 1.
+    p_error = 0.01
+    k_for_unit = 10
+    split_init_how = "nearest"
+    merge_how = "perfect"
     n_core = 10
     n_distribute = 10
-    smdc_reads_fname = "smdc_reads.pkl"
+    out_fname = "smdc_reads.pkl"
+    tmp_dname = "smdc_ovlp"
+    rand_seed = 0
 
     [assemble.sync_overlap]
+    k_for_unit = 10
+    max_units_diff = 0.01
+    max_seq_diff = 0.02
     n_core = 10
     n_distribute = 10
-    smdc_ovlps_fname = "sync_overlaps.pkl"
+    out_fname = "sync_overlaps.pkl"
+    tmp_dname = "sync_ovlp"
+
+    [assemble.sync_filter]
+    max_diff = 0.001
+    min_ovlp_len = 6000
+    best_overlap_by = "diff"
+    out_fname = "sync_filtered_overlaps.pkl"
+
+        [assemble.sync_filter.adaptive_args]
+        min_n_ovlp = 2
+        default_min_ovlp_len = 10000
+        limit_min_ovlp_len = 6000
 
     [assemble.layout]
     n_core = 10
-    contigs_fname = "contigs.fasta"
+    out_fname = "contigs.fasta"
