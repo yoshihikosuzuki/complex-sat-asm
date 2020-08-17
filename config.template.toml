@@ -46,7 +46,7 @@ out_fname = "filtered_reads.pkl"
 reads_fname = "filtered_reads.pkl"
 
     [assemble.unsync_overlap]
-    global = false
+    #global = false
     unit_offset = 1
     k_unit = 2
     k_spectrum = 13
@@ -79,7 +79,7 @@ reads_fname = "filtered_reads.pkl"
 
     [assemble.unit_clustering]
     th_ward = 0.01
-    alpha = 1.
+    alpha = 1.0
     p_error = 0.01
     k_for_unit = 10
     split_init_how = "nearest"

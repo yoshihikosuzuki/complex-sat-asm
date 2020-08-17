@@ -101,6 +101,7 @@ def main():
         ReadSynchronizer(
             reads_fname=config["assemble"]["reads_fname"],
             overlaps_fname=config["assemble"]["unsync_filter"]["out_fname"],
+            scheduler=scheduler,
             verbose=config["verbose"],
             **config["assemble"]["unit_sync"]).run()
     if "smdc" in tasks:
@@ -163,7 +164,7 @@ def parse_args() -> Dict:
         default="config.toml",
         help="TOML file. [config.toml]")
     args = parser.parse_args()
-    assert args.task_name in ("extract", "filter", "assemble", "all"), \
+    assert args.task_name in {"extract", "filter", "assemble", "all"} | ALL, \
         f"Invalid task name: {args.task_name}"
     config = toml.load(args.config_fname)
     config["task"] = args.task_name
