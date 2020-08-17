@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import List, Tuple, Dict
 from copy import deepcopy
-from collections import Counter
+from collections import defaultdict, Counter
 import numpy as np
 from logzero import logger
 from BITS.clustering.seq import ClusteringSeq
@@ -9,7 +9,7 @@ from BITS.seq.align import EdlibRunner
 from BITS.util.io import save_pickle, load_pickle
 from BITS.util.proc import NoDaemonPool, run_command
 from BITS.util.scheduler import Scheduler, run_distribute
-from ..type import TRRead, TRUnit, revcomp_read
+from ..type import Overlap, TRRead, TRUnit, revcomp_read
 
 
 @dataclass(eq=False)
@@ -33,6 +33,7 @@ class ReadSynchronizer:
     """
     reads_fname: str
     overlaps_fname: str
+    default_min_ovlp_len: int
     th_ward: float = 0.15
     th_map: float = 0.1
     scheduler: Scheduler = Scheduler()
@@ -51,6 +52,7 @@ class ReadSynchronizer:
             args=self.filter_read_ids(),
             shared_args=dict(reads_fname=self.reads_fname,
                              overlaps_fname=self.overlaps_fname,
+                             default_min_ovlp_len=self.default_min_ovlp_len,
                              th_ward=self.th_ward,
                              th_map=self.th_map),
             scheduler=self.scheduler,
@@ -98,13 +100,40 @@ class ReadSynchronizer:
             return filtered_read_ids
 
 
+def calc_min_ovlp_lens(read_ids: List[int],
+                       overlaps: List[Overlap],
+                       default_min_ovlp_len: int) -> Dict[int, int]:
+    overlaps_per_read = defaultdict(list)
+    for o in overlaps:
+        overlaps_per_read[o.a_read_id].append(o)
+        overlaps_per_read[o.b_read_id].append(o.swap())
+    min_ovlp_len_per_read = {}
+    for read_id in read_ids:
+        min_ovlp_len = min([o.length for o in overlaps_per_read[read_id]])
+        min_ovlp_len_per_read[read_id] = min(min_ovlp_len,
+                                             default_min_ovlp_len)
+    return min_ovlp_len_per_read
+
+
+def calc_k(read: TRRead,
+           min_ovlp_len: int) -> int:
+    def n_units_in_intvl_start_from(unit):
+        s = unit.start
+        t = s + min_ovlp_len
+        return len(list(filter(lambda u: s <= u.start and u.end < t,
+                               read.units)))
+
+    return min([n_units_in_intvl_start_from(unit) for unit in read.units])
+
+
 def sync_reads(read_ids: List[int],
                reads_fname: str,
                overlaps_fname: str,
+               default_min_ovlp_len: int,
                th_ward: float,
                th_map: float,
-               n_core: int) -> List[Tuple[int, List[TRRead]]]:
-    global reads_by_id, overlaps
+               n_core: int) -> List[Tuple[int, int, List[TRRead]]]:
+    global reads_by_id, overlaps, min_ovlp_len_per_read
     reads = load_pickle(reads_fname)
     reads_by_id = {read.id: read for read in reads}
     overlaps = load_pickle(overlaps_fname)
@@ -117,7 +146,15 @@ def sync_reads(read_ids: List[int],
                                   th_map)
                                  for i in range(n_core)]):
             sync_reads += ret
-    return sync_reads
+    # Calculate the value of k for k-units used in SMDC and sync_overlap
+    min_ovlp_len_per_read = calc_min_ovlp_lens(read_ids,
+                                               overlaps,
+                                               default_min_ovlp_len)
+    return [(read_id,
+             calc_k(reads_by_id[read_id],
+                    min_ovlp_len_per_read[read_id]),
+             _reads)
+            for read_id, _reads in sync_reads]
 
 
 def sync_read_multi(read_ids: List[int],

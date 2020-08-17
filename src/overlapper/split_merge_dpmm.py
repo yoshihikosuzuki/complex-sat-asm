@@ -70,7 +70,6 @@ class SplitMergeDpmmOverlapper:
             shared_args=dict(th_ward=self.th_ward,
                              alpha=self.alpha,
                              p_error=self.p_error,
-                             k_for_unit=self.k_for_unit,
                              split_init_how=self.split_init_how,
                              merge_how=self.merge_how),
             scheduler=self.scheduler,
@@ -83,37 +82,36 @@ class SplitMergeDpmmOverlapper:
         save_pickle(labeled_reads, self.out_fname)
 
 
-def run_smdc_multi(sync_reads: List[Tuple[int, List[TRRead]]],
+def run_smdc_multi(sync_reads: List[Tuple[int, int, List[TRRead]]],
                    th_ward: float,
                    alpha: float,
                    p_error: float,
-                   k_for_unit: int,
                    split_init_how: str,
                    merge_how: str,
-                   n_core: int) -> List[Tuple[int, List[TRRead]]]:
+                   n_core: int) -> List[Tuple[int, int, List[TRRead]]]:
     with NoDaemonPool(n_core) as pool:
         return list(pool.starmap(run_smdc,
                                  [(read_id,
+                                   k_for_unit,
                                    reads,
                                    th_ward,
                                    alpha,
                                    p_error,
-                                   k_for_unit,
                                    split_init_how,
                                    merge_how)
-                                  for read_id, reads in sync_reads]))
+                                  for read_id, k_for_unit, reads in sync_reads]))
 
 
 def run_smdc(read_id: int,
+             k_for_unit: int,
              reads: List[TRRead],
              th_ward: float,
              alpha: float,
              p_error: float,
-             k_for_unit: int,
              split_init_how: str,
              merge_how: str,
              n_core: int = 1,
-             plot: bool = False) -> Tuple[int, List[TRRead]]:
+             plot: bool = False) -> Tuple[int, int, List[TRRead]]:
     def handle_isolated_units(smdc: ClusteringSeqSMD) -> ClusteringSeqSMD:
         indices_isolated = []
         for i in range(smdc.N):
@@ -151,7 +149,6 @@ def run_smdc(read_id: int,
 
     assert all([read.synchronized for read in reads]), "Synchronize first"
     # Collect all k-monomers in the reads
-    # TODO: XXX: properly treat insertions between units
     units, quals = [], []
     for read in reads:
         units += [read.seq[read.units[i].start:read.units[i + k_for_unit - 1].end]
@@ -174,7 +171,6 @@ def run_smdc(read_id: int,
     smdc = handle_isolated_units(smdc)
     smdc.cluster_hierarchical(threshold=th_ward)
     logger.debug(f"Hierarchical clustering assignments:\n{smdc.assignments}")
-    # TODO: remove single "outlier" units?
     # (probably from regions covered only once)
     smdc.gibbs_full()
     smdc.normalize_assignments()
@@ -233,4 +229,4 @@ def run_smdc(read_id: int,
             unit.repr_id = smdc.assignments[index]
             unit.repr_aln = er.align(k_unit_seq, repr_units[unit.repr_id])
             index += 1
-    return read_id, reads
+    return read_id, k_for_unit, reads

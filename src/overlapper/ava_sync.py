@@ -16,7 +16,6 @@ er_global = EdlibRunner("global", revcomp=False)
 @dataclass(eq=False)
 class SyncReadsOverlapper:
     sync_reads_fname: str
-    k_for_unit: int = 30
     max_units_diff: float = 0.01
     max_seq_diff: float = 0.02
     scheduler: Scheduler = Scheduler()
@@ -33,15 +32,14 @@ class SyncReadsOverlapper:
         sync_reads = load_pickle(self.sync_reads_fname)
         assert (isinstance(sync_reads, list)
                 and isinstance(sync_reads[0], tuple)), \
-            "`sync_reads_fname` must contain `List[Tuple[int, List[TRRead]]]`"
+            "`sync_reads_fname` must contain `List[Tuple[int, int, List[TRRead]]]`"
         assert all([read.synchronized
-                    for _, reads in sync_reads
+                    for _, _, reads in sync_reads
                     for read in reads]), "Synchronize units first"
         overlaps = run_distribute(
             func=ava_sync,
             args=sync_reads,
-            shared_args=dict(k_for_unit=self.k_for_unit,
-                             max_units_diff=self.max_units_diff,
+            shared_args=dict(max_units_diff=self.max_units_diff,
                              max_seq_diff=self.max_seq_diff),
             scheduler=self.scheduler,
             n_distribute=self.n_distribute,
@@ -54,16 +52,15 @@ class SyncReadsOverlapper:
                     self.out_fname)
 
 
-def ava_sync(sync_reads: List[Tuple[int, List[TRRead]]],
-             k_for_unit: int,
+def ava_sync(sync_reads: List[Tuple[int, int, List[TRRead]]],
              max_units_diff: float,
              max_seq_diff: float,
              n_core: int) -> List[Overlap]:
     overlaps = set()
-    for read_id, reads in sync_reads:
+    for read_id, k_for_unit, reads in sync_reads:
         overlaps.update(_ava_sync(read_id,
-                                  reads,
                                   k_for_unit,
+                                  reads,
                                   max_units_diff,
                                   max_seq_diff,
                                   n_core))
@@ -71,8 +68,8 @@ def ava_sync(sync_reads: List[Tuple[int, List[TRRead]]],
 
 
 def _ava_sync(read_id: int,
-              reads: List[TRRead],
               k_for_unit: int,
+              reads: List[TRRead],
               max_units_diff: float,
               max_seq_diff: float,
               n_core: int) -> Set[Overlap]:
