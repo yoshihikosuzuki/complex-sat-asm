@@ -1,5 +1,6 @@
 from itertools import chain
 from dataclasses import dataclass
+from typing import Optional
 from BITS.util.io import load_pickle, save_pickle
 from BITS.util.proc import run_command
 from BITS.util.scheduler import Scheduler, run_distribute
@@ -42,6 +43,8 @@ class UnsyncReadsOverlapper:
     scheduler: Scheduler = Scheduler()
     n_distribute: int = 1
     n_core: int = 1
+    max_cpu_hour: Optional[int] = None
+    max_mem_gb: Optional[int] = None
     out_fname: str = "unsync_overlaps.pkl"
     tmp_dname: str = "unsync_ovlp"
     verbose: bool = False
@@ -77,6 +80,8 @@ class UnsyncReadsOverlapper:
             scheduler=self.scheduler,
             n_distribute=self.n_distribute,
             n_core=self.n_core,
+            max_cpu_hour=self.max_cpu_hour,
+            max_mem_gb=self.max_mem_gb,
             tmp_dname=self.tmp_dname,
             job_name="ava_unsync",
             out_fname=self.out_fname,

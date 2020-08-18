@@ -42,6 +42,8 @@ class DatrufRunner:
     scheduler: Optional[Scheduler] = None
     n_distribute: int = 1
     n_core: int = 1
+    max_cpu_hour: Optional[int] = None
+    max_mem_gb: Optional[int] = None
     out_fname: str = "tr_reads.pkl"
     tmp_dname: str = "datruf"
     verbose: bool = False
@@ -81,6 +83,8 @@ class DatrufRunner:
             scheduler=self.scheduler,
             n_distribute=self.n_distribute,
             n_core=self.n_core,
+            max_cpu_hour=self.max_cpu_hour,
+            max_mem_gb=self.max_mem_gb,
             tmp_dname=self.tmp_dname,
             job_name="datruf",
             out_fname=self.out_fname,
