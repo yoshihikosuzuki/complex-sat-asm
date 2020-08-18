@@ -27,11 +27,11 @@ EXTRACT = {"fasta_to_db",
            "load_qv"}
 FILTER = {"filter_reads"}
 ASSEMBLE = {"unsync_overlap",
-            "filter_unsync",
+            "unsync_filter",
             "sync",
             "smdc",
-            "sync_overlap"
-            "filter_sync",
+            "sync_overlap",
+            "sync_filter",
             "contig"}
 ALL = EXTRACT | FILTER | ASSEMBLE
 
@@ -79,7 +79,7 @@ def main():
                               scheduler=scheduler,
                               verbose=config["verbose"],
                               **config["assemble"]["unsync_overlap"]).run()
-    if "filter_unsync" in tasks:
+    if "unsync_filter" in tasks:
         # Adaptively filter unsynchronized overlaps
         filter_unsync(overlaps_fname=config["assemble"]["unsync_overlap"]["out_fname"],
                       **config["assemble"]["unsync_filter"])
@@ -105,7 +105,7 @@ def main():
             scheduler=scheduler,
             verbose=config["verbose"],
             **config["assemble"]["sync_overlap"]).run()
-    if "filter_sync" in tasks:
+    if "sync_filter" in tasks:
         # Adaptively filter synchronized overlaps
         filter_sync(overlaps_fname=config["assemble"]["sync_overlap"]["out_fname"],
                     **config["assemble"]["sync_filter"])

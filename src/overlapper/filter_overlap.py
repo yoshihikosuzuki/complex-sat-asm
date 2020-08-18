@@ -163,7 +163,7 @@ def adaptive_filter_overlaps(overlaps: List[Overlap],
                           default_min_ovlp_len),
                       limit_min_ovlp_len)
         min_lens.append(min_len)
-        return list(filter(lambda o: o.length >= min_len, _overlaps)),
+        return list(filter(lambda o: o.length >= min_len, _overlaps))
 
     overlaps_per_read = defaultdict(list)
     for o in overlaps:

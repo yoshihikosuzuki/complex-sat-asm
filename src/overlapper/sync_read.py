@@ -117,13 +117,18 @@ def calc_min_ovlp_lens(read_ids: List[int],
 
 def calc_k(read: TRRead,
            min_ovlp_len: int) -> int:
-    def n_units_in_intvl_start_from(unit):
+    if read.units[0].start + min_ovlp_len >= read.length:
+        return 1
+    min_k = len(read.units)
+    for unit in read.units:
         s = unit.start
         t = s + min_ovlp_len
-        return len(list(filter(lambda u: s <= u.start and u.end < t,
-                               read.units)))
-
-    return min([n_units_in_intvl_start_from(unit) for unit in read.units])
+        if t >= read.length:
+            continue
+        min_k = min(min_k,
+                    len(list(filter(lambda u: s <= u.start and u.end < t,
+                                    read.units))))
+    return min_k
 
 
 def sync_reads(read_ids: List[int],
