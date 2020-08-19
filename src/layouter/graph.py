@@ -21,18 +21,27 @@ def reduce_graph(sg: ig.Graph) -> List[ig.Graph]:
     reduced_ccs = []
     for i, g in enumerate(sg_ccs):
         logger.info(f"### cc {i}")
+        # Resolve mis-joins of bundles
         reduced_g = \
-            remove_join_edges(
-                remove_spur_edges(
-                    remove_isolated_edges(g)))
+            remove_spur_edges(
+                remove_join_edges(
+                    remove_spur_edges(
+                        remove_isolated_edges(g))))
         reduced_g.vs.select(_degree=0).delete()
         if reduced_g.vcount() == 0:
             continue
+        # Resolve remaining mis-jons between middle of bundles
+        reduced_g = \
+            remove_isolated_edges(
+                reduce_transitive_edges(reduced_g),
+                only_cut_edges=True)
+        if reduced_g.vcount() == 0:
+            continue
+        # Choose longest paths for each maximal DAG component
         reduced_ccs.append(
             reduce_simple_paths(
                 find_longest_path(
-                    find_longest_path(
-                        reduce_transitive_edges(reduced_g)))))
+                    find_longest_path(reduced_g))))
     return reduced_ccs
 
 
@@ -185,7 +194,8 @@ def remove_spur_edges(g: ig.Graph) -> ig.Graph:
     return removed_g
 
 
-def remove_isolated_edges(g: ig.Graph) -> ig.Graph:
+def remove_isolated_edges(g: ig.Graph,
+                          only_cut_edges: bool = False) -> ig.Graph:
     """Remove every path consisting only of an isolated single edge."""
     isolated_edges = []
     for e in g.es:
@@ -193,7 +203,8 @@ def remove_isolated_edges(g: ig.Graph) -> ig.Graph:
         _g = deepcopy(g)
         _g.delete_edges(e.index)
         min_weight = _g.shortest_paths(source=s, target=t, mode="ALL")[0][0]
-        if (min_weight != 2
+        if ((min_weight != 2 if not only_cut_edges
+             else min_weight == float("inf"))
                 and len(v_to_in_edges(s, _g)) > 0
                 and len(v_to_out_edges(s, _g)) > 0
                 and len(v_to_in_edges(t, _g)) > 0
@@ -250,8 +261,8 @@ def find_longest_path(g: ig.Graph) -> ig.Graph:
                      maximal directed acyclic subgraph.
           @ path   : List of edges of the longest path in the maximal DAG.
         """
-        assert direction in ("IN", "OUT"),
-        "`direction` must be one of {'IN', 'OUT'}"
+        assert direction in ("IN", "OUT"), \
+            "`direction` must be one of {'IN', 'OUT'}"
         v_index_to_name = {v.index: v["name"] for v in g.vs}
         dag_vs = [v_index_to_name[v]
                   for v in (g.topological_sorting() if direction == "OUT"
