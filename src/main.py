@@ -2,6 +2,7 @@ from typing import Dict
 import argparse
 import toml
 from BITS.seq.io import fasta_to_db, save_fasta
+from BITS.util.io import load_pickle
 from BITS.util.scheduler import Scheduler
 from .datander import DatanderRunner
 from .datruf import (DatrufRunner,
@@ -13,11 +14,9 @@ from .overlapper import (UnsyncReadsOverlapper,
                          SyncReadsOverlapper,
                          filter_unsync,
                          filter_sync)
-"""
 from .layouter.graph import (overlaps_to_string_graph,
                              reduce_graph)
 from .layouter.contig import graphs_to_contigs
-"""
 
 
 # Predefined sets of tasks
@@ -109,20 +108,19 @@ def main():
         # Adaptively filter synchronized overlaps
         filter_sync(overlaps_fname=config["assemble"]["sync_overlap"]["out_fname"],
                     **config["assemble"]["sync_filter"])
-    """
     if "contig" in tasks:
         # Construct a string graph
-        sg = overlaps_to_string_graph(filtered_overlaps)
+        overlaps = load_pickle(config["assemble"]["sync_filter"]["out_fname"])
+        sg = overlaps_to_string_graph(overlaps)
         sg_ccs = reduce_graph(sg)
         # Generate contigs
         reads = load_pickle(config["assemble"]["reads_fname"])
         reads_by_id = {read.id: read for read in reads}
         contigs = graphs_to_contigs(sg_ccs,
-                                    filtered_overlaps,
+                                    overlaps,
                                     reads_by_id,
                                     n_core=config["assemble"]["layout"]["n_core"])
         save_fasta(contigs, config["assemble"]["layout"]["out_fname"])
-    """
 
 
 def parse_args() -> Dict:

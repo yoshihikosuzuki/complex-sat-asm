@@ -15,6 +15,28 @@ def overlaps_to_string_graph(overlaps: List[Overlap]) -> ig.Graph:
                              directed=True)
 
 
+def reduce_graph(sg: ig.Graph) -> List[ig.Graph]:
+    def graph_reduction(g: ig.Graph) -> Optional[ig.Graph]:
+        clean_g = remove_spur_edges(remove_isolated_edges(g))
+        clean_g.vs.select(_degree=0).delete()
+        if clean_g.vcount() == 0:
+            return None
+        return \
+            reduce_simple_paths(
+                find_longest_path(
+                    find_longest_path(
+                        reduce_transitive_edges(clean_g))))
+
+    sg_ccs = remove_revcomp_graph(sg)
+    reduced_ccs = []
+    for i, g in enumerate(sg_ccs):
+        logger.info(f"### cc {i}")
+        reduced_g = graph_reduction(g)
+        if reduced_g is not None:
+            reduced_ccs.append(reduced_g)
+    return reduced_ccs
+
+
 def remove_revcomp_graph(g: ig.Graph) -> List[ig.Graph]:
     """Remove every connected component that is revcomp of another one."""
     n_cc_prev = len(g.clusters(mode="weak").subgraphs())
@@ -169,21 +191,19 @@ def remove_isolated_edges(g: ig.Graph) -> ig.Graph:
     isolated_edges = []
     for e in g.es:
         s, t = e["source"], e["target"]
-        _g = deepcopy(g)   # TODO: do the same thing without copy
+        _g = deepcopy(g)
         _g.delete_edges(e.index)
         min_weight = _g.shortest_paths(source=s, target=t, mode="ALL")[0][0]
-        if min_weight != 2:
-            if min_weight == float("inf"):
-                # single-edge cut of two connected components
-                # TODO: remove this if there are two main paths
-                logger.debug(f"Cut by single edge: {s} -> {t}")
-            else:
-                isolated_edges.append((s, t))
-    logger.debug(isolated_edges)
-    removed_g = ig.Graph.DictList(edges=[e.attributes() for e in g.es
-                                         if (e["source"], e["target"]) not in isolated_edges],
-                                  vertices=None,
-                                  directed=True)
+        if (min_weight != 2
+            and len(v_to_in_edges(s, g)) > 0 and len(v_to_out_edges(s, g)) > 0
+                and len(v_to_in_edges(t, g)) > 0 and len(v_to_out_edges(t, g))):
+            isolated_edges.append((s, t))
+    logger.debug(f"Removed edges = {isolated_edges}")
+    removed_g = ig.Graph.DictList(
+        edges=[e.attributes() for e in g.es
+               if (e["source"], e["target"]) not in isolated_edges],
+        vertices=None,
+        directed=True)
     logger.info(f"{g.ecount()} -> {removed_g.ecount()} edges")
     return removed_g
 
@@ -203,8 +223,8 @@ def find_longest_path(g: ig.Graph) -> ig.Graph:
                      maximal directed acyclic subgraph.
           @ path   : List of edges of the longest path in the maximal DAG.
         """
-        assert direction in ("IN", "OUT"), \
-            "`direction` must be one of {'IN', 'OUT'}"
+        assert direction in ("IN", "OUT"),
+        "`direction` must be one of {'IN', 'OUT'}"
         v_index_to_name = {v.index: v["name"] for v in g.vs}
         dag_vs = [v_index_to_name[v]
                   for v in (g.topological_sorting() if direction == "OUT"
