@@ -16,24 +16,23 @@ def overlaps_to_string_graph(overlaps: List[Overlap]) -> ig.Graph:
 
 
 def reduce_graph(sg: ig.Graph) -> List[ig.Graph]:
-    def graph_reduction(g: ig.Graph) -> Optional[ig.Graph]:
-        clean_g = remove_spur_edges(remove_isolated_edges(g))
-        clean_g.vs.select(_degree=0).delete()
-        if clean_g.vcount() == 0:
-            return None
-        return \
-            reduce_simple_paths(
-                find_longest_path(
-                    find_longest_path(
-                        reduce_transitive_edges(clean_g))))
-
+    """Apply a series of graph reductions."""
     sg_ccs = remove_revcomp_graph(sg)
     reduced_ccs = []
     for i, g in enumerate(sg_ccs):
         logger.info(f"### cc {i}")
-        reduced_g = graph_reduction(g)
-        if reduced_g is not None:
-            reduced_ccs.append(reduced_g)
+        reduced_g = \
+            remove_join_edges(
+                remove_spur_edges(
+                    remove_isolated_edges(g)))
+        reduced_g.vs.select(_degree=0).delete()
+        if reduced_g.vcount() == 0:
+            continue
+        reduced_ccs.append(
+            reduce_simple_paths(
+                find_longest_path(
+                    find_longest_path(
+                        reduce_transitive_edges(reduced_g)))))
     return reduced_ccs
 
 
@@ -187,7 +186,7 @@ def remove_spur_edges(g: ig.Graph) -> ig.Graph:
 
 
 def remove_isolated_edges(g: ig.Graph) -> ig.Graph:
-    """Find every path consisting only of an isolated single edge."""
+    """Remove every path consisting only of an isolated single edge."""
     isolated_edges = []
     for e in g.es:
         s, t = e["source"], e["target"]
@@ -195,8 +194,36 @@ def remove_isolated_edges(g: ig.Graph) -> ig.Graph:
         _g.delete_edges(e.index)
         min_weight = _g.shortest_paths(source=s, target=t, mode="ALL")[0][0]
         if (min_weight != 2
-            and len(v_to_in_edges(s, g)) > 0 and len(v_to_out_edges(s, g)) > 0
-                and len(v_to_in_edges(t, g)) > 0 and len(v_to_out_edges(t, g))):
+                and len(v_to_in_edges(s, _g)) > 0
+                and len(v_to_out_edges(s, _g)) > 0
+                and len(v_to_in_edges(t, _g)) > 0
+                and len(v_to_out_edges(t, _g))):
+            isolated_edges.append((s, t))
+    logger.debug(f"Removed edges = {isolated_edges}")
+    removed_g = ig.Graph.DictList(
+        edges=[e.attributes() for e in g.es
+               if (e["source"], e["target"]) not in isolated_edges],
+        vertices=None,
+        directed=True)
+    logger.info(f"{g.ecount()} -> {removed_g.ecount()} edges")
+    return removed_g
+
+
+def remove_join_edges(g: ig.Graph) -> ig.Graph:
+    """Remove edges joining a bundle to the middle of another bundle.
+    Apply this after removing supr edges, otherwise paths will be cut around
+    the supr edges."""
+    isolated_edges = []
+    for e in g.es:
+        s, t = e["source"], e["target"]
+        _g = deepcopy(g)
+        _g.delete_edges(e.index)
+        min_weight = _g.shortest_paths(source=s, target=t, mode="ALL")[0][0]
+        if (min_weight != 2
+                and ((len(v_to_in_edges(s, _g)) > 0
+                      and len(v_to_out_edges(s, _g)) > 0)
+                     or (len(v_to_in_edges(t, _g)) > 0
+                         and len(v_to_out_edges(t, _g))))):
             isolated_edges.append((s, t))
     logger.debug(f"Removed edges = {isolated_edges}")
     removed_g = ig.Graph.DictList(
