@@ -37,11 +37,15 @@ ALL = EXTRACT | FILTER | ASSEMBLE
 
 def main():
     config = parse_args()
-    tasks = (EXTRACT if config["task"] == "extract"
-             else FILTER if config["task"] == "filter"
-             else ASSEMBLE if config["task"] == "assemble"
-             else ALL if config["task"] == "all"
-             else {config["task"]})
+    tasks = config["tasks"]
+    if "extract" in config["tasks"]:
+        tasks |= EXTRACT
+    if "filter" in config["tasks"]:
+        tasks |= FILTER
+    if "assemble" in config["tasks"]:
+        tasks |= ASSEMBLE
+    if "all" in config["tasks"]:
+        tasks |= ALL
     scheduler = (Scheduler(**config["job_scheduler"]["args"])
                  if config["job_scheduler"]["use_scheduler"]
                  else None)
@@ -128,8 +132,9 @@ def parse_args() -> Dict:
         description="CSA: Complex Satellite Assembler")
     parser.add_argument(
         "task_name",
+        nargs='+',
         type=str,
-        help="Must be one of {'extract', 'filter', 'assemble', 'all'}.")
+        help="Must be subset of {'extract', 'filter', 'assemble', 'all'}.")
     parser.add_argument(
         "-c",
         "--config_fname",
@@ -137,10 +142,11 @@ def parse_args() -> Dict:
         default="config.toml",
         help="TOML file. [config.toml]")
     args = parser.parse_args()
-    assert args.task_name in {"extract", "filter", "assemble", "all"} | ALL, \
-        f"Invalid task name: {args.task_name}"
+    for task_name in args.task_name:
+        assert task_name in {"extract", "filter", "assemble", "all"} | ALL, \
+            f"Invalid task name: {task_name}"
     config = toml.load(args.config_fname)
-    config["task"] = args.task_name
+    config["tasks"] = set(args.task_name)
     return config
 
 

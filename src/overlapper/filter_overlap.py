@@ -59,7 +59,7 @@ def filter_unsync(overlaps_fname: str,
     # TODO: by="length" works for simulation datasets?
     # TODO: is this necessary?
     filtered_overlaps = best_overlaps_per_pair(filtered_overlaps,
-                                               by="length")
+                                               by="diff")
     # NOTE: By removing contained reads, you can save much time in overlap
     #       computation, although accuracy might decrease.
     # TODO: how about doing contained removal with a special, stringent threshold?
