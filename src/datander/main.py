@@ -31,7 +31,7 @@ class DatanderRunner:
 
     def __post_init__(self):
         run_command(f"rm -f .{self.db_prefix}.*.tan.* "
-                    f".{self.db_prefix}.tan.* TAN.*")
+                    f".{self.db_prefix}.tan.* TAN.{self.db_prefix}.*")
         run_command(f"mkdir -p {self.tmp_dname}; rm -f {self.tmp_dname}/*")
 
     def run(self):

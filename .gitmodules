@@ -1,6 +1,3 @@
-[submodule "BITS"]
-	path = BITS
-	url = https://github.com/yoshihikosuzuki/BITS
 [submodule "DAMASKER"]
 	path = DAMASKER
 	url = https://github.com/yoshihikosuzuki/DAMASKER

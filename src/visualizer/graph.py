@@ -54,7 +54,9 @@ def draw_string_graph(sg: ig.Graph,
          f"{'<br>'.join(edge_info[(e.source, e.target)])}",
          e_to_headwidth_col[e][1])
         for e in sg.es])
-    traces.append(make_scatter(x=x, y=y, text=t, col=c, marker_size=1))
+    traces.append(make_scatter(x=x, y=y, text=t,
+                               col=c,
+                               marker_size=1))
     # Node trace with color by cover rate by TR units
     if reads is not None:
         reads_by_id = (reads if isinstance(reads, dict)
