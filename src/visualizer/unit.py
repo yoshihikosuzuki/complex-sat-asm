@@ -26,7 +26,9 @@ def plot_ulen_dist(reads: List[TRRead],
     if by == "total":
         ulen_counts = {ulen: ulen * count
                        for ulen, count in ulen_counts.items()}
-    layout = make_layout(title=("Total bases for each unit length" if by == "total"
+    layout = make_layout(width=1000,
+                         height=500,
+                         title=("Total bases for each unit length" if by == "total"
                                 else "Number of units for each unit length"),
                          x_title="Unit length [bp]",
                          y_title=("Total bases [bp]" if by == "total"

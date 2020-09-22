@@ -36,29 +36,27 @@ class ContigMapping:
 
 
 def calc_hicanu_assembly_metrics(true_seq_fname: str,
-                                 contigs_fname: str,
-                                 read_layouts_fname: str,
-                                 read_names_fname: str,
+                                 out_dname: str,
+                                 out_prefix: str,
                                  mutation_locations: List[int],
                                  read_length: int,
                                  plot: bool = False) -> AssemblyMetrics:
     """
     positional arguments:
       @ true_seq_fname     : Fasta file of the true sequences.
-      @ contigs_fname      : Fasta file of HiCanu contigs. '*.contigs.fasta'
-      @ read_layouts_fname : '*.contigs.layout.readToTig'
-      @ read_names_fname   : '*.seqStore/readNames.txt'
+      @ out_dname          : Root directory of HiCanu assembly.
+      @ out_prefix         : Prefix of the HiCanu assembly files.
       @ mutation_locations : Locations of mutations in the true sequences.
       @ read_length        : Used for removing random flanking sequences.
 
     optional arguments:
       @ plot : Show alignment plot between true sequence and contigs.
     """
-    return _calc_assembly_metrics(calc_hicanu_contig_intvls(contigs_fname,
-                                                            read_layouts_fname,
-                                                            read_names_fname),
+    return _calc_assembly_metrics(calc_hicanu_contig_intvls(f"{out_dname}/{out_prefix}.contigs.fasta",
+                                                            f"{out_dname}/{out_prefix}.contigs.layout.readToTig",
+                                                            f"{out_dname}/{out_prefix}.seqStore/readNames.txt"),
                                   true_seq_fname,
-                                  contigs_fname,
+                                  f"{out_dname}/{out_prefix}.contigs.fasta",
                                   mutation_locations,
                                   read_length,
                                   plot)
