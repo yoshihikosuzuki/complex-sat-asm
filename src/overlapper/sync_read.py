@@ -75,12 +75,12 @@ class ReadSynchronizer:
             n_ovlps_per_read[o.a_read_id] += 1
             n_ovlps_per_read[o.b_read_id] += 1
         read_ids = set(n_ovlps_per_read.keys())
-        # NOTE: "90-90" rule for global mode
-        #       i.e. if >90% of reads involved in the overlaps overlap to
-        #       >90% of the reads, then run in a global mode.
-        if (len(list(filter(lambda c: c >= 0.9 * len(read_ids),
+        # NOTE: "80-80" rule for global mode
+        #       i.e. if >80% of reads involved in the overlaps overlap to
+        #       >80% of the reads, then run in a global mode.
+        if (len(list(filter(lambda c: c >= 0.8 * len(read_ids),
                             list(n_ovlps_per_read.values()))))
-                >= 0.9 * len(read_ids)):   # global mode
+                >= 0.8 * len(read_ids)):   # global mode
             # Pick up a single read that appears most frequently in overlaps
             logger.info("Run in global mode")
             return [n_ovlps_per_read.most_common()[0][0]]

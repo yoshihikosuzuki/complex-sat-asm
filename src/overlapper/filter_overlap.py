@@ -56,13 +56,10 @@ def filter_unsync(overlaps_fname: str,
                                                  default_min_ovlp_len,
                                                  limit_min_ovlp_len,
                                                  contained_removal)
-    # TODO: by="length" works for simulation datasets?
-    # TODO: is this necessary?
     filtered_overlaps = best_overlaps_per_pair(filtered_overlaps,
                                                by="diff")
     # NOTE: By removing contained reads, you can save much time in overlap
     #       computation, although accuracy might decrease.
-    # TODO: how about doing contained removal with a special, stringent threshold?
     if contained_removal:
         filtered_overlaps = remove_contained_reads(filtered_overlaps)
     save_pickle(filtered_overlaps, out_fname)
@@ -79,7 +76,6 @@ def filter_sync(overlaps_fname: str,
     filtered_overlaps = filter_overlaps(overlaps,
                                         max_diff,
                                         min_ovlp_len=0)
-    # TODO: by="length" works for simulation datasets?
     filtered_overlaps = best_overlaps_per_pair(filtered_overlaps,
                                                by="length")
     # Use adaptive filtering for removing short overlaps while keeping overlaps

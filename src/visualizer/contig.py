@@ -62,6 +62,27 @@ def calc_hicanu_assembly_metrics(true_seq_fname: str,
                                   plot)
 
 
+def calc_hifiasm_assembly_metrics(true_seq_fname: str,
+                                  reads_fname: str,
+                                  out_dname: str,
+                                  out_prefix: str,
+                                  mutation_locations: List[int],
+                                  read_length: int,
+                                  plot: bool = False) -> AssemblyMetrics:
+    # *.p_ctg.gfa is the contigs
+    # TODO: convert gfa to fasta
+    contigs_gfa_fname = f"{out_dname}/{out_prefix}.p_ctg.gfa"
+    contigs_fasta_fname = f"{out_dname}/{out_prefix}.p_ctg.fasta"
+    gfa_to_fasta(contigs_gfa_fname, contigs_fasta_fname)
+    return _calc_assembly_metrics(calc_hifiasm_contig_intvls(contigs_fasta_fname,
+                                                             reads_fname),
+                                  true_seq_fname,
+                                  contigs_fasta_fname,
+                                  mutation_locations,
+                                  read_length,
+                                  plot)
+
+
 def calc_csa_assembly_metrics(true_seq_fname: str,
                               contigs_fname: str,
                               reads_fname: str,
