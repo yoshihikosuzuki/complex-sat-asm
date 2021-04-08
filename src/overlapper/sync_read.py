@@ -4,11 +4,11 @@ from copy import deepcopy
 from collections import defaultdict, Counter
 import numpy as np
 from logzero import logger
-from BITS.clustering.seq import ClusteringSeq
-from BITS.seq.align import EdlibRunner
-from BITS.util.io import save_pickle, load_pickle
-from BITS.util.proc import NoDaemonPool, run_command
-from BITS.util.scheduler import Scheduler, run_distribute
+from csa.BITS.clustering.seq import ClusteringSeq
+from csa.BITS.seq.align import EdlibRunner
+from csa.BITS.util.io import save_pickle, load_pickle
+from csa.BITS.util.proc import NoDaemonPool, run_command
+from csa.BITS.util.scheduler import Scheduler, run_distribute
 from ..type import Overlap, TRRead, TRUnit, revcomp_read
 
 

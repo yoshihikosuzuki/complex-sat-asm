@@ -1,6 +1,6 @@
 from typing import NamedTuple, Tuple
-from BITS.seq.align import EdlibAlignment, EdlibRunner
-from BITS.seq.util import reverse_seq
+from csa.BITS.seq.align import EdlibAlignment, EdlibRunner
+from csa.BITS.seq.util import reverse_seq
 
 er_prefix = EdlibRunner("prefix", revcomp=False)
 

@@ -1,7 +1,7 @@
 from typing import Optional, Tuple, List
 import numpy as np
-from BITS.clustering.seq import ClusteringSeq
-from BITS.plot.plotly import make_line, make_rect, make_scatter, make_layout, show_plot
+from csa.BITS.clustering.seq import ClusteringSeq
+from csa.BITS.plot.plotly import make_line, make_rect, make_scatter, make_layout, show_plot
 from csa.datruf.core import find_inner_alns
 from csa.type import TRRead
 from .col import ID_TO_COL, DIST_TO_COL

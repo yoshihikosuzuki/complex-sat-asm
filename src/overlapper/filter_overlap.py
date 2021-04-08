@@ -2,9 +2,9 @@ from typing import List
 from collections import defaultdict
 from statistics import mean, stdev
 from logzero import logger
-from BITS.plot.plotly import make_hist, make_layout, show_plot
-from BITS.util.io import load_pickle, save_pickle
-from BITS.util.union_find import UnionFind
+from csa.BITS.plot.plotly import make_hist, make_layout, show_plot
+from csa.BITS.util.io import load_pickle, save_pickle
+from csa.BITS.util.union_find import UnionFind
 from ..type import Overlap
 
 

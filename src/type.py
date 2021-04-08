@@ -2,9 +2,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, List, Dict
 import numpy as np
-from BITS.seq.io import DazzRecord, SeqInterval
-from BITS.seq.align import EdlibAlignment, EdlibRunner
-from BITS.seq.util import revcomp_seq
+from csa.BITS.seq.io import DazzRecord, SeqInterval
+from csa.BITS.seq.align import EdlibAlignment, EdlibRunner
+from csa.BITS.seq.util import revcomp_seq
 
 
 @dataclass(frozen=True)

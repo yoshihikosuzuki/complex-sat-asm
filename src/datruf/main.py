@@ -2,9 +2,9 @@ from dataclasses import dataclass
 from typing import Optional, Tuple, List
 from multiprocessing.pool import Pool
 from logzero import logger
-from BITS.seq.io import db_to_n_reads
-from BITS.util.io import save_pickle
-from BITS.util.scheduler import Scheduler, run_distribute
+from csa.BITS.seq.io import db_to_n_reads
+from csa.BITS.util.io import save_pickle
+from csa.BITS.util.scheduler import Scheduler, run_distribute
 from .core import find_units
 from ..type import TRRead
 

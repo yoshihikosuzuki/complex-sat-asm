@@ -5,12 +5,12 @@ from collections import defaultdict
 from logzero import logger
 import igraph as ig
 import consed
-from BITS.seq.io import FastaRecord
-from BITS.seq.align import EdlibRunner
-from BITS.seq.cigar import Cigar
-from BITS.seq.alt_consensus import consensus_alt
-from BITS.seq.util import reverse_seq, revcomp_seq
-from BITS.util.proc import NoDaemonPool
+from csa.BITS.seq.io import FastaRecord
+from csa.BITS.seq.align import EdlibRunner
+from csa.BITS.seq.cigar import Cigar
+from csa.BITS.seq.alt_consensus import consensus_alt
+from csa.BITS.seq.util import reverse_seq, revcomp_seq
+from csa.BITS.util.proc import NoDaemonPool
 from ..type import TRRead, Overlap
 from ..overlapper.align_proper import can_be_query
 

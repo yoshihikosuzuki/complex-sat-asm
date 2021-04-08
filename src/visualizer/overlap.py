@@ -1,7 +1,7 @@
 from collections import Counter
 from typing import List
 import numpy as np
-from BITS.plot.plotly import (make_line, make_rect, make_hist, make_scatter,
+from csa.BITS.plot.plotly import (make_line, make_rect, make_hist, make_scatter,
                               make_layout, show_plot)
 from ..type import TRRead, Overlap
 

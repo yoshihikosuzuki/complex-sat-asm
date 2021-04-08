@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import List
-from BITS.seq.io import FastaRecord
-from BITS.seq.align import EdlibRunner
+from csa.BITS.seq.io import FastaRecord
+from csa.BITS.seq.align import EdlibRunner
 from .rand_seq import gen_unique_seq
 from .edit_script import EditWeightsType, insert_variants
 

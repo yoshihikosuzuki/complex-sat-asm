@@ -5,8 +5,8 @@ import random
 import numpy as np
 from logzero import logger
 import consed
-from BITS.clustering.seq import ClusteringSeq
-from BITS.seq.alt_consensus import consensus_alt, count_discrepants
+from csa.BITS.clustering.seq import ClusteringSeq
+from csa.BITS.seq.alt_consensus import consensus_alt, count_discrepants
 
 PHRED_TO_LOGP_ERROR = [-phred / 10 for phred in range(94)]
 PHRED_TO_LOGP_CORRECT = [-np.inf if phred == 0

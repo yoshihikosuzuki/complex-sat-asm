@@ -1,7 +1,7 @@
 from typing import NamedTuple, List, Tuple, Set
 from logzero import logger
-from BITS.seq.align import EdlibRunner
-from BITS.util.proc import NoDaemonPool
+from csa.BITS.seq.align import EdlibRunner
+from csa.BITS.util.proc import NoDaemonPool
 from ..type import TRRead, Overlap
 from .read_spectrum import BoundaryKUnit
 from .align_proper import proper_alignment, can_be_query

@@ -2,7 +2,7 @@ from typing import List, Set, Sequence
 import numpy as np
 from interval import interval
 from logzero import logger
-from BITS.util.interval import intvl_len, subtract_intvl
+from csa.BITS.util.interval import intvl_len, subtract_intvl
 from .io import load_tr_reads, load_paths
 from ..type import SelfAlignment, TRUnit, TRRead
 

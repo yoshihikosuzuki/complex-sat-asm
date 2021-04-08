@@ -2,10 +2,10 @@ from dataclasses import dataclass
 from typing import Optional, List, Tuple, Set
 from multiprocessing import Pool
 from logzero import logger
-from BITS.seq.align import EdlibRunner
-from BITS.util.io import load_pickle, save_pickle
-from BITS.util.proc import run_command
-from BITS.util.scheduler import Scheduler, run_distribute
+from csa.BITS.seq.align import EdlibRunner
+from csa.BITS.util.io import load_pickle, save_pickle
+from csa.BITS.util.proc import run_command
+from csa.BITS.util.scheduler import Scheduler, run_distribute
 from .align_proper import proper_alignment
 from .filter_overlap import reduce_same_overlaps
 from ..type import TRRead, Overlap

@@ -1,9 +1,9 @@
 from os.path import join
 from dataclasses import dataclass
 from typing import Optional
-from BITS.seq.io import db_to_n_blocks
-from BITS.util.proc import run_command
-from BITS.util.scheduler import Scheduler
+from csa.BITS.seq.io import db_to_n_blocks
+from csa.BITS.util.proc import run_command
+from csa.BITS.util.scheduler import Scheduler
 
 
 @dataclass(eq=False)

@@ -1,7 +1,7 @@
 from collections import defaultdict, Counter
 from typing import Optional, Union, List, Dict
 import igraph as ig
-from BITS.plot.plotly import make_lines, make_scatter, make_layout, show_plot
+from csa.BITS.plot.plotly import make_lines, make_scatter, make_layout, show_plot
 from ..type import TRRead
 
 

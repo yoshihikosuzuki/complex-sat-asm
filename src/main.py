@@ -1,9 +1,9 @@
 from typing import Dict
 import argparse
 import toml
-from BITS.seq.io import fasta_to_db, save_fasta
-from BITS.util.io import load_pickle
-from BITS.util.scheduler import Scheduler
+from csa.BITS.seq.io import fasta_to_db, save_fasta
+from csa.BITS.util.io import load_pickle
+from csa.BITS.util.scheduler import Scheduler
 from .datander import DatanderRunner
 from .datruf import (DatrufRunner,
                      load_qv,

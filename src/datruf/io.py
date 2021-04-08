@@ -1,7 +1,7 @@
 from typing import Tuple, List, Dict, Set
 from collections import defaultdict
-from BITS.seq.io import load_db, load_db_track
-from BITS.util.proc import run_command
+from csa.BITS.seq.io import load_db, load_db_track
+from csa.BITS.util.proc import run_command
 from ..type import SelfAlignment, TRRead
 
 

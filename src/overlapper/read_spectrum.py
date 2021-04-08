@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Set
-from BITS.seq.io import SeqInterval
-from BITS.seq.kmer import kmer_spectrum
+from csa.BITS.seq.io import SeqInterval
+from csa.BITS.seq.kmer import kmer_spectrum
 from ..type import TRRead
 
 

@@ -1,6 +1,6 @@
 from typing import Union, Optional, List
 from collections import Counter
-from BITS.plot.plotly import make_hist, make_scatter, make_layout, show_plot
+from csa.BITS.plot.plotly import make_hist, make_scatter, make_layout, show_plot
 from ..type import TRRead
 
 

@@ -4,12 +4,12 @@ from collections import defaultdict
 import plotly.graph_objects as go
 from logzero import logger
 from interval import interval
-from BITS.seq.io import load_fasta, save_fasta, FastaRecord
-from BITS.seq.align_affine import align_affine
-from BITS.seq.cigar import Cigar, FlattenCigar
-from BITS.seq.util import revcomp_seq
-from BITS.plot.plotly import make_lines, make_scatter, make_layout, show_plot
-from BITS.util.interval import intvl_len, subtract_intvl
+from csa.BITS.seq.io import load_fasta, save_fasta, FastaRecord
+from csa.BITS.seq.align_affine import align_affine
+from csa.BITS.seq.cigar import Cigar, FlattenCigar
+from csa.BITS.seq.util import revcomp_seq
+from csa.BITS.plot.plotly import make_lines, make_scatter, make_layout, show_plot
+from csa.BITS.util.interval import intvl_len, subtract_intvl
 
 
 @dataclass

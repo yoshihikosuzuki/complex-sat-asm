@@ -1,7 +1,7 @@
 from typing import Optional, Tuple, List
 import numpy as np
-from BITS.seq.align import EdlibRunner
-from BITS.plot.plotly import make_line, make_rect, make_scatter, make_layout, show_plot
+from csa.BITS.seq.align import EdlibRunner
+from csa.BITS.plot.plotly import make_line, make_rect, make_scatter, make_layout, show_plot
 from csa.type import TRRead
 from .col import ID_TO_COL, DIST_TO_COL
 

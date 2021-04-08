@@ -1,6 +1,6 @@
 from typing import Optional, Union, List, Tuple
 from logzero import logger
-from BITS.util.io import load_pickle, save_pickle
+from csa.BITS.util.io import load_pickle, save_pickle
 from ..type import TRRead
 
 

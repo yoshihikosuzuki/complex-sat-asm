@@ -3,10 +3,10 @@ from dataclasses import dataclass, field
 from typing import ClassVar, Type, List
 import random
 from logzero import logger
-from BITS.seq.io import FastaRecord, save_fasta
-from BITS.seq.util import revcomp_seq
-from BITS.util.io import save_pickle
-from BITS.util.proc import run_command
+from csa.BITS.seq.io import FastaRecord, save_fasta
+from csa.BITS.seq.util import revcomp_seq
+from csa.BITS.util.io import save_pickle
+from csa.BITS.util.proc import run_command
 from .rand_seq import gen_unique_seq
 from .edit_script import EditWeightsType, insert_variants
 

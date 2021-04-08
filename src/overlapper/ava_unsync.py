@@ -1,9 +1,9 @@
 from itertools import chain
 from dataclasses import dataclass
 from typing import Optional
-from BITS.util.io import load_pickle, save_pickle
-from BITS.util.proc import run_command
-from BITS.util.scheduler import Scheduler, run_distribute
+from csa.BITS.util.io import load_pickle, save_pickle
+from csa.BITS.util.proc import run_command
+from csa.BITS.util.scheduler import Scheduler, run_distribute
 from ..type import revcomp_read
 from .read_spectrum import add_read_spec, add_boundary_specs
 from .svs_unsync import svs_unsync

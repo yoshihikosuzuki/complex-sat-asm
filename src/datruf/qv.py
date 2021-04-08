@@ -1,7 +1,7 @@
 from typing import Optional
 import numpy as np
-from BITS.seq.io import load_fastq
-from BITS.util.io import load_pickle, save_pickle
+from csa.BITS.seq.io import load_fastq
+from csa.BITS.util.io import load_pickle, save_pickle
 
 
 def load_qv(reads_fname: str,
