@@ -10,7 +10,7 @@ Our objective is a _de novo_ assembler for any type of complex satellites with P
 - [DAZZ_DB](https://github.com/thegenemyers/DAZZ_DB)
 - [DALIGNER](https://github.com/thegenemyers/DALIGNER)
 - Custom [DAMASKER](https://github.com/yoshihikosuzuki/DAMASKER) (cloned togeher with this repository)
-- A python package named `BITS` (go to the `BITS/` directory of this repository and install it; Note that it is different from [this package](https://github.com/yoshihikosuzuki/bits))
+- A python package named `BITS` (go to the `BITS/` directory of this repository and install it; Note that it is old version of [this package](https://github.com/yoshihikosuzuki/bits))
 - Unpublished software named Consed for computing a consensus of multiple sequences (we will offer alternative codes; detection of tandem repeats and units does not require it)
 
 ## How to install
