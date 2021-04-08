@@ -16,8 +16,10 @@ Our objective is a _de novo_ assembler for any type of complex satellites with P
 ## How to install
 
 ```bash
+(Install DAZZ_DB, DALIGNER)
 $ git clone --recursive https://github.com/yoshihikosuzuki/complex-sat-asm
 $ cd complex-sat-asm
+(Install DAMASKER, BITS(, consed_python))
 $ python setup.py install
 ```
 
