@@ -67,7 +67,7 @@ def main():
                      scheduler=scheduler,
                      verbose=config["verbose"],
                      **config["extract"]["unit_detection"]).run()
-    if "load_qv" in tasks:
+    if "load_qv" in tasks and "load_qv" in config["extract"]:
         # Load QV data
         load_qv(reads_fname=config["extract"]["unit_detection"]["out_fname"],
                 **config["extract"]["load_qv"])

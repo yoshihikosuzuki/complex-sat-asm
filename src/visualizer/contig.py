@@ -4,7 +4,7 @@ from collections import defaultdict
 import plotly.graph_objects as go
 from logzero import logger
 from interval import interval
-from BITS.seq.io import load_fasta
+from BITS.seq.io import load_fasta, save_fasta, FastaRecord
 from BITS.seq.align_affine import align_affine
 from BITS.seq.cigar import Cigar, FlattenCigar
 from BITS.seq.util import revcomp_seq
@@ -69,13 +69,21 @@ def calc_hifiasm_assembly_metrics(true_seq_fname: str,
                                   mutation_locations: List[int],
                                   read_length: int,
                                   plot: bool = False) -> AssemblyMetrics:
-    # *.p_ctg.gfa is the contigs
-    # TODO: convert gfa to fasta
+    def gfa_to_fasta(in_fname, out_fname):
+        seqs = []
+        with open(in_fname, 'r') as f:
+            for line in f:
+                data = line.strip().split()
+                if data[0] != 'S':
+                    continue
+                seqs.append(FastaRecord(name=data[1],
+                                        seq=data[2].lower()))
+        save_fasta(seqs, out_fname)
     contigs_gfa_fname = f"{out_dname}/{out_prefix}.p_ctg.gfa"
     contigs_fasta_fname = f"{out_dname}/{out_prefix}.p_ctg.fasta"
     gfa_to_fasta(contigs_gfa_fname, contigs_fasta_fname)
-    return _calc_assembly_metrics(calc_hifiasm_contig_intvls(contigs_fasta_fname,
-                                                             reads_fname),
+    return _calc_assembly_metrics(calc_hifiasm_contig_intvls(reads_fname,
+                                                             contigs_gfa_fname),
                                   true_seq_fname,
                                   contigs_fasta_fname,
                                   mutation_locations,
@@ -142,10 +150,13 @@ def filter_mappings(mappings: List[ContigMapping],
     mappings = sorted(mappings, key=lambda x: x.end - x.start, reverse=True)
     filtered_mappings = []
     true_seq = load_fasta(true_seq_fname)[0]
-    uncovered_intvls = interval([0, true_seq.length - 2 * read_length])
+    uncovered_intvls = interval([0, true_seq.length])
     for mapping in mappings:
         mapped_intvl = interval([mapping.start, mapping.end])
-        if intvl_len(mapped_intvl & uncovered_intvls) > 1000:
+        uncovered_len = intvl_len(mapped_intvl & uncovered_intvls)
+        logger.info(
+            f"Mapping {mapping.start}-{mapping.end}: {uncovered_len} uncovered length")
+        if uncovered_len > 1000:
             filtered_mappings.append(mapping)
             uncovered_intvls = subtract_intvl(uncovered_intvls, mapped_intvl)
     return filtered_mappings
@@ -183,19 +194,21 @@ def mappings_to_metrics(mappings: List[ContigMapping],
                         n_del_bases += l
     n_missing_units = -(-intvl_len(uncovered_intvls) // unit_length)
 
+    # Check if the mutation is correctly assembled for each mutation
+    # *only* on the assembled units
     mutation_locations = [pos - read_length for pos in mutation_locations]
-    # Check if the mutation is assembled for each mutation
-    mutation_status = {pos: None for pos in mutation_locations}
+    mutation_assembled = {pos: False for pos in mutation_locations
+                          if pos not in uncovered_intvls}
     for mapping in mappings:
         true_pos = mapping.start
         for op in mapping.cigar.flatten():
-            if (true_pos in mutation_status
-                    and mutation_status[true_pos] in (None, '=')):
-                mutation_status[true_pos] = op
+            if true_pos in mutation_assembled and op == '=':
+                mutation_assembled[true_pos] = True
             if op != 'I':
                 true_pos += 1
-    n_mis_mutations = len(list(filter(lambda x: x != '=',
-                                      mutation_status.values())))
+        assert true_pos == mapping.end
+    n_mis_mutations = len(list(filter(lambda x: x is False,
+                                      mutation_assembled.values())))
 
     return AssemblyMetrics(len(mappings),
                            n_ins_units,
@@ -266,6 +279,44 @@ def calc_hicanu_contig_intvls(contigs_fname: str,
                          key=lambda x: x.start)
         strand, start, end = find_contig_start_end(layouts[0].read_name,
                                                    layouts[-1].read_name)
+        mappings.append(ContigMapping(contig_name=contig_name,
+                                      strand=strand,
+                                      start=start,
+                                      end=end))
+    return mappings
+
+
+def calc_hifiasm_contig_intvls(reads_fname: str,
+                               contigs_fname: str) -> List[ContigMapping]:
+    """Find the interval in the true sequence corresponding to each CSA contig."""
+    reads = load_fasta(reads_fname)
+    reads_by_name = {read.name.split()[0]: read for read in reads}
+    read_tilings = []
+    mappings = []
+    with open(contigs_fname, 'r') as f:
+        for line in f:
+            data = line.strip().split()
+            if data[0] == 'S':
+                contig_name = data[1]
+                if len(read_tilings) == 0:
+                    continue
+                first_read = read_tilings[0]
+                last_read = read_tilings[-1]
+                strand, start, end = find_contig_start_end(first_read.name,
+                                                           last_read.name)
+                mappings.append(ContigMapping(contig_name=contig_name,
+                                              strand=strand,
+                                              start=start,
+                                              end=end))
+                read_tilings = []
+            if data[0] == 'A':
+                assert data[1] == contig_name
+                read_name = data[4]
+                read_tilings.append(reads_by_name[read_name])
+        first_read = read_tilings[0]
+        last_read = read_tilings[-1]
+        strand, start, end = find_contig_start_end(first_read.name,
+                                                   last_read.name)
         mappings.append(ContigMapping(contig_name=contig_name,
                                       strand=strand,
                                       start=start,
