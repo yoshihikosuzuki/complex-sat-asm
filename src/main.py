@@ -62,7 +62,7 @@ def main():
                        **config["extract"]["tr_detection"]).run()
     if "datruf" in tasks:
         # Detect tandem repeat units
-        DatrufRunner(db_fname=f"{config['extract']['db_prefix']}.db",
+        DatrufRunner(db_fname=f"{config['extract']['db_prefix']}.{config['extract']['db_suffix']}",
                      las_fname=f"TAN.{config['extract']['db_prefix']}.las",
                      scheduler=scheduler,
                      verbose=config["verbose"],
