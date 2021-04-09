@@ -39,7 +39,7 @@ class DatanderRunner:
         script = run_command(f"HPC.TANmask -T{self.n_core} "
                              f"{self.db_prefix}.{self.db_suffix}")
         if db_to_n_blocks(f"{self.db_prefix}.{self.db_suffix}") > 1:
-            script += '\n'.join([f"Catrack -v {self.db_prefix} tan",
+            script += '\n'.join([f"Catrack -v {self.db_prefix}.{self.db_suffix} tan",
                                  f"rm .{self.db_prefix}.*.tan.*"])
 
         # Run the script
